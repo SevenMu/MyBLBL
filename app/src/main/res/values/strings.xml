@@ -479,6 +479,8 @@
     <string name="sdk_version">SDK版本</string>
     <string name="cpu_arch">CPU架构</string>
     <string name="screen_resolution">屏幕分辨率</string>
+    <string name="window_metrics">窗口与渲染</string>
+    <string name="window_metrics_format">%1$dx%2$d · 渲染%3$.2f · 设计%4$.2f · 缩放%5$d%%</string>
     <string name="hardware_decode">硬解支持</string>
     <string name="log_record">日志记录</string>
     <string name="debug_log">调试日志</string>

@@ -77,7 +77,7 @@ class MyBLBLApplication : Application() {
         initPieWebViewDataDir()
         AppLog.init(this)
         // Toast 等使用 Application 级 Resources 的场景与 Activity 同倍率
-        com.mytvb.core.ui.base.UiScale.apply(resources)
+        com.mytvb.core.ui.base.UiScale.apply(resources, "app")
         AppLog.i(TAG, "STARTUP T0 app.onCreate start")
         AppLog.i(TAG, "STARTUP T1 app.onCreate end minimal elapsed=${SystemClock.elapsedRealtime() - startMs}ms")
     }
