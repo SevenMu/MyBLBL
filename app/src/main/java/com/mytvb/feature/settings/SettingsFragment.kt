@@ -148,6 +148,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
         private const val KEY_SDK_VERSION = "info_sdk_version"
         private const val KEY_CPU_ABI = "info_cpu_abi"
         private const val KEY_SCREEN_RESOLUTION = "info_screen_resolution"
+        private const val KEY_WINDOW_METRICS = "info_window_metrics"
         private const val KEY_CODEC = "info_codec"
 
         /**
@@ -371,6 +372,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
                 plain(KEY_SDK_VERSION, R.string.sdk_version, Build.VERSION.SDK_INT.toString()),
                 plain(KEY_CPU_ABI, R.string.cpu_arch, Build.SUPPORTED_ABIS.firstOrNull() ?: "unknown"),
                 plain(KEY_SCREEN_RESOLUTION, R.string.screen_resolution, ScreenUtils.getRealScreenInfo(requireContext()).toString()),
+                plain(KEY_WINDOW_METRICS, R.string.window_metrics, buildWindowMetricsValue()),
                 plain(KEY_CODEC, R.string.hardware_decode, "")
             ))
         )
@@ -378,6 +380,22 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
         restoreSavedSettings()
         updateCacheSizeAsync()
         updateCodecSupportAsync()
+    }
+
+    /**
+     * 诊断用数值：App 实际窗口尺寸 + 生效渲染倍率（钉死的 density）+ 设计倍率 + 用户缩放档。
+     * 校验关系：渲染倍率应等于「设计 × 缩放」。不一致（如渲染 3.00 而设计 2.00、缩放 100%）
+     * 即说明密度被系统重置且未被守卫补钉——电视上排查尺寸异常（弹窗被裁、UI 放大/缩小）
+     * 时先看这里，无需抓日志。
+     */
+    private fun buildWindowMetricsValue(): String {
+        val dm = resources.displayMetrics
+        val design = UiScale.designScale(dm.widthPixels, dm.heightPixels)
+        val percent = Math.round(UiScale.scale() * 100f)
+        return getString(
+            R.string.window_metrics_format,
+            dm.widthPixels, dm.heightPixels, dm.density, design, percent
+        )
     }
 
     private fun groupsOf(category: Int): List<SettingGroup> = when (category) {
@@ -739,9 +757,14 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
             ).apply { setMargins(px18, px20, px18, px18); gravity = android.view.Gravity.END }
         }
         root.addView(cancelButton)
-        dialog.setContentView(root)
+        DialogWindowFit.overlay(
+            dialog,
+            DialogWindowFit.wrapContentInScroll(requireContext(), root),
+            resources.getDimensionPixelSize(R.dimen.px800),
+            cancelOnOutside = false,
+            tag = "x5Download"
+        )
         dialog.show()
-        DialogWindowFit.apply(dialog.window, requireContext(), resources.getDimensionPixelSize(R.dimen.px800))
 
         updateX5StatusItem(getString(R.string.x5_status_downloading))
 
@@ -1027,7 +1050,13 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
         }
 
         root.addView(actionContainer)
-        dialog.setContentView(root)
+        DialogWindowFit.overlay(
+            dialog,
+            DialogWindowFit.wrapContentInScroll(requireContext(), root),
+            resources.getDimensionPixelSize(R.dimen.px800),
+            cancelOnOutside = false,
+            tag = "riskControl"
+        )
         // 焦点在按钮上时 DPAD 上/下不会路由进 ScrollView，由弹窗层转发驱动正文滚动；
         // 左右/确认/返回不拦，按钮焦点切换与关闭行为不受影响
         dialog.setOnKeyListener { _, keyCode, event ->
@@ -1046,7 +1075,6 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
             }
         }
         dialog.show()
-        DialogWindowFit.apply(dialog.window, requireContext(), resources.getDimensionPixelSize(R.dimen.px800))
         // TV 弹窗惯例显式落焦点（其余弹窗均有）：默认在「取消」安全侧，防误触直接开下载；
         // 遥控器左右在两按钮间切换，上下滚正文。show 后立即调会被 ViewRootImpl 的
         // 初始焦点分配覆盖，必须等首次布局完成
@@ -1130,9 +1158,13 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
         }
         root.addView(cancelButton)
 
-        dialog.setContentView(root)
+        DialogWindowFit.overlay(
+            dialog,
+            DialogWindowFit.wrapContentInScroll(requireContext(), root),
+            resources.getDimensionPixelSize(R.dimen.px800),
+            tag = "apkDownload"
+        )
         dialog.show()
-        DialogWindowFit.apply(dialog.window, requireContext(), resources.getDimensionPixelSize(R.dimen.px800))
 
         downloadJob = updateScope.launch {
             try {
@@ -1524,8 +1556,15 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
     /** UI 文字大小：档位选择 + 底部实时预览，确认后 recreate 让全界面生效。 */
     private fun showUiTextScaleDialog() {
         val dialog = AppCompatDialog(requireContext(), R.style.DialogTheme)
-        dialog.setContentView(R.layout.dialog_ui_text_scale)
         dialog.setCanceledOnTouchOutside(true)
+        // 固定尺寸卡片（布局根 match_parent 依赖窗口定尺寸），fill 载体下显式传高
+        DialogWindowFit.overlay(
+            dialog,
+            layoutInflater.inflate(R.layout.dialog_ui_text_scale, null),
+            resources.getDimensionPixelSize(R.dimen.px800),
+            heightPx = resources.getDimensionPixelSize(R.dimen.px740),
+            tag = "uiTextScale"
+        )
         dialog.findViewById<View>(R.id.dialog_root)?.setOnClickListener { dialog.dismiss() }
 
         val titleView = dialog.findViewById<TextView>(R.id.top_title)
@@ -1581,11 +1620,6 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
             }
         }
         dialog.show()
-        DialogWindowFit.apply(
-            dialog.window, requireContext(),
-            resources.getDimensionPixelSize(R.dimen.px800),
-            resources.getDimensionPixelSize(R.dimen.px740)
-        )
     }
 
     /** 视频卡片大小：选完 recreate，所有视频网格经 adaptiveSpanCount 统一生效。 */
@@ -1648,8 +1682,15 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
         onSelected: (String) -> Unit
     ) {
         val dialog = AppCompatDialog(requireContext(), R.style.DialogTheme)
-        dialog.setContentView(R.layout.dialog_setting_choice)
         dialog.setCanceledOnTouchOutside(true)
+        // 固定尺寸卡片（布局根 match_parent 依赖窗口定尺寸），fill 载体下显式传高
+        DialogWindowFit.overlay(
+            dialog,
+            layoutInflater.inflate(R.layout.dialog_setting_choice, null),
+            resources.getDimensionPixelSize(R.dimen.px800),
+            heightPx = resources.getDimensionPixelSize(R.dimen.px615),
+            tag = "settingChoice"
+        )
         dialog.findViewById<View>(R.id.dialog_root)?.setOnClickListener { dialog.dismiss() }
 
         val titleView = dialog.findViewById<TextView>(R.id.top_title)
@@ -1684,11 +1725,6 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
             }
         }
         dialog.show()
-        DialogWindowFit.apply(
-            dialog.window, requireContext(),
-            resources.getDimensionPixelSize(R.dimen.px800),
-            resources.getDimensionPixelSize(R.dimen.px615)
-        )
     }
 
     private fun showListCategory(groups: List<SettingGroup>, animate: Boolean) {
@@ -1954,11 +1990,15 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
         }
 
         root.addView(actionContainer)
-        dialog.setContentView(root)
+        // 固定卡片宽度（与其他设置弹窗一致）：wrap 在窄屏上会把底部按钮排到
+        // 没空间，最后一个按钮被压窄导致文字逐字竖排
+        DialogWindowFit.overlay(
+            dialog,
+            DialogWindowFit.wrapContentInScroll(requireContext(), root),
+            resources.getDimensionPixelSize(R.dimen.px800),
+            tag = "teenCredential"
+        )
         dialog.show()
-        // 固定弹窗宽度（与其他设置弹窗一致）：wrap_content 在窄屏上会把
-        // 底部按钮排到没空间，最后一个按钮被压窄导致文字逐字竖排
-        DialogWindowFit.apply(dialog.window, requireContext(), resources.getDimensionPixelSize(R.dimen.px800))
         actionContainer.getChildAt(0)?.requestFocus()
     }
 
@@ -2077,10 +2117,14 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
         }
 
         root.addView(actionContainer)
-        dialog.setContentView(root)
+        DialogWindowFit.overlay(
+            dialog,
+            DialogWindowFit.wrapContentInScroll(requireContext(), root),
+            resources.getDimensionPixelSize(R.dimen.px800),
+            tag = "gaiaVoucher"
+        )
         dialog.setOnShowListener { editText.requestFocus() }
         dialog.show()
-        DialogWindowFit.apply(dialog.window, requireContext(), resources.getDimensionPixelSize(R.dimen.px800))
     }
 
     private fun showMinorProtectionVerifyDialog(onVerified: () -> Unit) {
@@ -2207,7 +2251,12 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
             LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT
         ).apply { setMargins(px40, px20, px40, 0) })
 
-        dialog.setContentView(root)
+        DialogWindowFit.overlay(
+            dialog,
+            DialogWindowFit.wrapContentInScroll(requireContext(), root),
+            resources.getDimensionPixelSize(R.dimen.px800),
+            tag = "konami"
+        )
         dialog.setOnShowListener { root.post { root.requestFocus() } }
         dialog.show()
     }

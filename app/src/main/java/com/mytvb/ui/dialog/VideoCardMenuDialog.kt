@@ -77,9 +77,12 @@ class VideoCardMenuDialog(
 
     init {
         supportRequestWindowFeature(Window.FEATURE_NO_TITLE)
-        setContentView(binding.root)
-        val screenWidth = context.resources.displayMetrics.widthPixels
-        window?.setLayout((screenWidth * 0.45).toInt(), android.view.ViewGroup.LayoutParams.WRAP_CONTENT)
+        // fill 全屏窗口 + 居中卡片（华为电视对独立小窗有延迟裁高，fill 载体不受影响）
+        DialogWindowFit.overlay(
+            this, binding.root,
+            (context.resources.displayMetrics.widthPixels * 0.45).toInt(),
+            tag = "menu"
+        )
         // 菜单项较多（历史删除/稍后再看/详情/UP主页/收藏/两个不感兴趣）时整体会高过屏幕，
         // 底部选项被裁；限制菜单区最高 80% 屏高，超出转为滚动
         binding.menuScroll.maxHeight =
@@ -456,8 +459,15 @@ class VideoCardMenuDialog(
 
     private fun displayFavoriteFolderChooser(folders: List<FavoriteFolderModel>) {
         val dialog = AppCompatDialog(context, R.style.DialogTheme)
-        dialog.setContentView(R.layout.dialog_favorite_folder)
         dialog.setCanceledOnTouchOutside(true)
+        // 固定尺寸卡片（布局根 match_parent 依赖窗口定尺寸），fill 载体下显式传高
+        DialogWindowFit.overlay(
+            dialog,
+            LayoutInflater.from(context).inflate(R.layout.dialog_favorite_folder, null),
+            context.resources.getDimensionPixelSize(R.dimen.px800),
+            heightPx = context.resources.getDimensionPixelSize(R.dimen.px615),
+            tag = "favFolder"
+        )
         dialog.findViewById<View>(R.id.dialog_root)?.setOnClickListener { dialog.dismiss() }
 
         val titleView = dialog.findViewById<android.widget.TextView>(R.id.top_title)
@@ -513,11 +523,6 @@ class VideoCardMenuDialog(
             }
         }
         dialog.show()
-        DialogWindowFit.apply(
-            dialog.window, context,
-            context.resources.getDimensionPixelSize(R.dimen.px800),
-            context.resources.getDimensionPixelSize(R.dimen.px615)
-        )
     }
 
     private fun refreshFavoriteState() {

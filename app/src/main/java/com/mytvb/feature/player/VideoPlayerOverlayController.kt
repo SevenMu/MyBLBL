@@ -2,6 +2,7 @@ package com.mytvb.feature.player
 
 import android.view.Gravity
 import android.view.KeyEvent
+import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewTreeObserver
@@ -76,8 +77,15 @@ class VideoPlayerOverlayController(
         uiCoordinator.transition(UiEvent.PanelOpened(PanelType.EPISODE))
 
         val dialog = AppCompatDialog(activity, R.style.DialogTheme)
-        dialog.setContentView(R.layout.dialog_choose_episode)
         dialog.setCanceledOnTouchOutside(true)
+        // 固定尺寸卡片（布局根 match_parent 依赖窗口定尺寸），fill 载体下显式传高
+        DialogWindowFit.overlay(
+            dialog,
+            LayoutInflater.from(activity).inflate(R.layout.dialog_choose_episode, null),
+            activity.resources.getDimensionPixelSize(R.dimen.px1000),
+            heightPx = activity.resources.getDimensionPixelSize(R.dimen.px615),
+            tag = "episode"
+        )
 
         val recyclerView = dialog.findViewById<RecyclerView>(R.id.recyclerView)
         val titleView = dialog.findViewById<TextView>(R.id.top_title)
@@ -150,11 +158,6 @@ class VideoPlayerOverlayController(
             }
         }
         dialog.show()
-        DialogWindowFit.apply(
-            dialog.window, activity,
-            activity.resources.getDimensionPixelSize(R.dimen.px1000),
-            activity.resources.getDimensionPixelSize(R.dimen.px615)
-        )
     }
 
     /**
@@ -191,9 +194,15 @@ class VideoPlayerOverlayController(
         ).also { seasonDialogRef = it }
         dialog.setCanceledOnTouchOutside(true)
         // 贴屏幕右侧、垂直居中；宽高由布局根节点固定（px600×px935），
-        // floating dialog 上 MATCH_PARENT 窗口高会退化为 wrap 内容，不能用
-        dialog.window?.setGravity(Gravity.END or Gravity.CENTER_VERTICAL)
-        dialog.setContentView(R.layout.dialog_choose_episode_season)
+        // 卡片经 fill 载体右侧对齐，自动钳 92% 屏高
+        DialogWindowFit.overlay(
+            dialog,
+            LayoutInflater.from(activity).inflate(R.layout.dialog_choose_episode_season, null),
+            activity.resources.getDimensionPixelSize(R.dimen.px600),
+            heightPx = activity.resources.getDimensionPixelSize(R.dimen.px935),
+            gravity = Gravity.END or Gravity.CENTER_VERTICAL,
+            tag = "seasonEpisode"
+        )
 
         val titleView = dialog.findViewById<TextView>(R.id.top_title)
         val recyclerView = dialog.findViewById<RecyclerView>(R.id.recyclerView)
@@ -314,11 +323,6 @@ class VideoPlayerOverlayController(
             }
         }
         dialog.show()
-        DialogWindowFit.apply(
-            dialog.window, activity,
-            activity.resources.getDimensionPixelSize(R.dimen.px600),
-            activity.resources.getDimensionPixelSize(R.dimen.px935)
-        )
         // 布局完成后兜底设初始焦点；窗口焦点监听在部分路径（触摸唤起）下时机不稳
         recyclerView.post {
             if (dialog.isShowing) {

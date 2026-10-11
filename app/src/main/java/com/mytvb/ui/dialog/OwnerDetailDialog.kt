@@ -7,6 +7,7 @@ import androidx.activity.OnBackPressedCallback
 import androidx.core.content.ContextCompat
 import android.view.LayoutInflater
 import android.view.Window
+import com.mytvb.core.ui.base.DialogWindowFit
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatDialog
 import androidx.core.view.isVisible
@@ -146,17 +147,14 @@ class OwnerDetailDialog(
 
     init {
         supportRequestWindowFeature(Window.FEATURE_NO_TITLE)
-        setContentView(binding.root)
         setCanceledOnTouchOutside(true)
-        // 设计尺寸 px1400×px935，但在低分屏/大缩放系数下换算后的像素可能超过屏幕物理尺寸，
-        // 浮层 window 会被系统钳到屏幕大小而内容仍按原尺寸绘制，左右卡片内容被裁；
-        // 这里取设计尺寸与屏幕 92% 的较小值，布局内部用约束自适应 window 实际大小。
-        val dm = context.resources.displayMetrics
-        val designWidth = context.resources.getDimensionPixelSize(R.dimen.px1400)
-        val designHeight = context.resources.getDimensionPixelSize(R.dimen.px935)
-        window?.setLayout(
-            minOf(designWidth, (dm.widthPixels * 0.92f).toInt()),
-            minOf(designHeight, (dm.heightPixels * 0.92f).toInt())
+        // 设计尺寸 px1400×px935 固定卡片：fill 载体自动钳屏幕 92%，布局内部用约束
+        // 自适应卡片实际大小；不再经独立窗口尺寸协商（华为电视会延迟裁高独立小窗）。
+        DialogWindowFit.overlay(
+            this, binding.root,
+            context.resources.getDimensionPixelSize(R.dimen.px1400),
+            heightPx = context.resources.getDimensionPixelSize(R.dimen.px935),
+            tag = "ownerDetail"
         )
         binding.root.setOnClickListener { dismiss() }
         initView()

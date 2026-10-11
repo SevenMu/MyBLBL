@@ -54,11 +54,12 @@ class PlayerActionDialog(
 
     init {
         supportRequestWindowFeature(Window.FEATURE_NO_TITLE)
-        setContentView(binding.root)
         setCanceledOnTouchOutside(true)
-        DialogWindowFit.apply(
-            window, context,
-            context.resources.getDimensionPixelSize(R.dimen.px1000)
+        DialogWindowFit.overlay(
+            this,
+            DialogWindowFit.wrapContentInScroll(context, binding.root),
+            context.resources.getDimensionPixelSize(R.dimen.px1000),
+            tag = "playerAction"
         )
         binding.root.setOnClickListener { dismiss() }
         initListeners()
@@ -354,8 +355,15 @@ class PlayerActionDialog(
 
     private fun displayFavoriteFolderChooser(folders: List<FavoriteFolderModel>) {
         val dialog = AppCompatDialog(context, R.style.DialogTheme)
-        dialog.setContentView(R.layout.dialog_favorite_folder)
         dialog.setCanceledOnTouchOutside(true)
+        // 固定尺寸卡片（布局根 match_parent 依赖窗口定尺寸），fill 载体下显式传高
+        DialogWindowFit.overlay(
+            dialog,
+            LayoutInflater.from(context).inflate(R.layout.dialog_favorite_folder, null),
+            context.resources.getDimensionPixelSize(R.dimen.px800),
+            heightPx = context.resources.getDimensionPixelSize(R.dimen.px615),
+            tag = "favFolder"
+        )
         dialog.findViewById<View>(R.id.dialog_root)?.setOnClickListener { dialog.dismiss() }
 
         val titleView = dialog.findViewById<android.widget.TextView>(R.id.top_title)
@@ -407,11 +415,6 @@ class PlayerActionDialog(
             }
         }
         dialog.show()
-        DialogWindowFit.apply(
-            dialog.window, context,
-            context.resources.getDimensionPixelSize(R.dimen.px800),
-            context.resources.getDimensionPixelSize(R.dimen.px615)
-        )
     }
 
     private fun loadCoinMultiply(): Int {

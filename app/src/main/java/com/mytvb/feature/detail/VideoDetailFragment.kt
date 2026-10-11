@@ -715,16 +715,16 @@ class VideoDetailFragment : androidx.fragment.app.Fragment() {
             .inflate(LayoutInflater.from(requireContext()))
         dialogBinding.textDescription.text = description
         val dialog = androidx.appcompat.app.AppCompatDialog(requireContext(), R.style.DialogTheme)
-        dialog.setContentView(dialogBinding.root)
         dialog.setCanceledOnTouchOutside(true)
         dialog.setOnCancelListener { /* back key or touch outside */ }
-        dialog.show()
-        // 简介可能很长：高度超屏时钳到 92% 屏高由 ScrollView 滚动展示
-        DialogWindowFit.apply(
-            dialog.window, requireContext(),
+        // 简介可能很长：固定高卡片自动钳 92% 屏高，由布局根 ScrollView 滚动展示
+        DialogWindowFit.overlay(
+            dialog, dialogBinding.root,
             resources.getDimensionPixelSize(R.dimen.px1200),
-            resources.getDimensionPixelSize(R.dimen.px800)
+            heightPx = resources.getDimensionPixelSize(R.dimen.px800),
+            tag = "description"
         )
+        dialog.show()
     }
 
 

@@ -39,11 +39,12 @@ class UserInfoDialog(context: Context) : AppCompatDialog(context, R.style.Dialog
 
     init {
         supportRequestWindowFeature(Window.FEATURE_NO_TITLE)
-        setContentView(binding.root)
         setCanceledOnTouchOutside(true)
-        DialogWindowFit.apply(
-            window, context,
-            context.resources.getDimensionPixelSize(R.dimen.px620)
+        DialogWindowFit.overlay(
+            this,
+            DialogWindowFit.wrapContentInScroll(context, binding.root),
+            context.resources.getDimensionPixelSize(R.dimen.px620),
+            tag = "userInfo"
         )
         binding.root.setOnClickListener { dismiss() }
         bindUserInfo(sessionGateway.getUserInfo())
