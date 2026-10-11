@@ -1816,7 +1816,8 @@ class MyPlayerView @JvmOverloads constructor(
         }
 
         tapAccumulateDeltaMs += 10_000L * if (forward) 1 else -1
-        val targetMs = (tapAccumulateBaseMs + tapAccumulateDeltaMs).coerceIn(0L, duration)
+        val targetMs = (tapAccumulateBaseMs + tapAccumulateDeltaMs)
+            .coerceIn(0L, com.mytvb.feature.player.SeekSession.seekUpperBoundMs(duration))
 
         controller?.beginSeekPreview(targetMs)
         showTimelineThumbPreview(targetMs, duration)
@@ -1834,10 +1835,15 @@ class MyPlayerView @JvmOverloads constructor(
         val commitRunnable = Runnable {
             val p = player ?: return@Runnable
             val wasTimebarSeek = timebarSeekActive
-            val finalTarget = (tapAccumulateBaseMs + tapAccumulateDeltaMs).coerceIn(0L, p.duration.coerceAtLeast(0L))
-            p.seekTo(finalTarget)
-            onUserSeekListener?.invoke(finalTarget)
-            syncDanmakuPosition(finalTarget, forceSeek = true)
+            // duration 暂不可用（切集/换流窗口期）时放弃本次提交：
+            // 若照旧钳值会上限退化成 0，seekTo(0) 凭空跳回片头
+            if (p.duration > 0L) {
+                val finalTarget = (tapAccumulateBaseMs + tapAccumulateDeltaMs)
+                    .coerceIn(0L, com.mytvb.feature.player.SeekSession.seekUpperBoundMs(p.duration))
+                p.seekTo(finalTarget)
+                onUserSeekListener?.invoke(finalTarget)
+                syncDanmakuPosition(finalTarget, forceSeek = true)
+            }
             if (wasTimebarSeek) {
                 // timebar 场景焦点始终在进度条上、语义是完整控制栏：恢复信息层即可
                 // （finishSeekPreviewProgressOnly 在持久细条模式下会 exit 整个控制器，
@@ -1954,7 +1960,8 @@ class MyPlayerView @JvmOverloads constructor(
         // 步长按片长自适应：长按 timebarSeekTraverseMs 走完全片（与 UI 隐藏长按
         // 路径同一模型），替代原固定 60s 步长（30 分钟剧 3 秒后即 2000s/s，快进过头）
         val step = timebarScrubStepMs(durationMs = duration) * if (timebarSeekForward) 1 else -1
-        timebarSeekTargetMs = (timebarSeekTargetMs + step).coerceIn(0L, duration)
+        timebarSeekTargetMs = (timebarSeekTargetMs + step)
+            .coerceIn(0L, com.mytvb.feature.player.SeekSession.seekUpperBoundMs(duration))
 
         controller?.beginSeekPreview(timebarSeekTargetMs)
         // blbl 形态：缩略图浮窗跟随进度条滑块（不是中央 overlay）

@@ -789,8 +789,10 @@ class MyPlayerControlView @JvmOverloads constructor(
         }
         val duration = p.duration
         val target = p.currentPosition + ffDuration
-        val targetPositionMs = if (duration != C.TIME_UNSET) {
-            target.coerceAtMost(duration)
+        val targetPositionMs = if (duration != C.TIME_UNSET && duration > 0L) {
+            // 上限距片尾留安全余量（同连按右键/长按 tick 各路径）：seekTo 恰好落在
+            // duration 上会被 media3 立即判定播完，触发自动连播，进度条从 0 开始
+            target.coerceAtMost(com.mytvb.feature.player.SeekSession.seekUpperBoundMs(duration))
         } else {
             target
         }
