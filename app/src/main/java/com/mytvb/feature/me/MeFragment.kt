@@ -196,13 +196,18 @@ class MeFragment : BaseFragment<FragmentMeBinding>(), MainTabFocusTarget, OnBack
 
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                appEventHub.events.collectLatest { event ->
+                    appEventHub.events.collectLatest { event ->
                     if (event == AppEventHub.Event.UserSessionChanged) {
                         pendingRefreshAfterLogin = true
                         viewModel.loadUserInfo()
                         adapter.getFragments().forEach { fragment ->
                             if (fragment.view != null) {
-                                (fragment as? MeTabPage)?.refresh()
+                                val page = fragment as? MeTabPage ?: return@forEach
+                                if (page.shouldDeferSessionRefresh()) {
+                                    // 静默刷新进行中（如播放器返回），同接口数据在途，跳过回顶重排
+                                    return@forEach
+                                }
+                                page.refresh()
                             }
                         }
                     }
@@ -346,7 +351,12 @@ class MeFragment : BaseFragment<FragmentMeBinding>(), MainTabFocusTarget, OnBack
                 if (!isAdded || view == null) return@post
                 adapter.getFragments().forEach { fragment ->
                     if (fragment.view != null) {
-                        (fragment as? MeTabPage)?.refresh()
+                        val page = fragment as? MeTabPage ?: return@forEach
+                        if (page.shouldDeferSessionRefresh()) {
+                            // 静默刷新进行中（如播放器返回），同接口数据在途，跳过回顶重排
+                            return@forEach
+                        }
+                        page.refresh()
                     }
                 }
             }
