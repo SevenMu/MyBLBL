@@ -404,6 +404,11 @@ class MeListFragment : BaseFragment<FragmentMeTabListBinding>(), MeTabPage, com.
 
     private suspend fun bindHistoryData(videos: List<HistoryVideoModel>) {
         AppLog.d("MeDebug", "[history] bindHistoryData: raw=${videos.size}, pendingHistoryScroll=$pendingHistoryScrollToTop, currentPage=$currentPage, adapterCount=${historyAdapter?.contentCount() ?: 0}")
+        // 挂起前先捕获本次渲染意图：loading collect 的 settlePendingRefreshAfterNoop
+        // 与本函数分属两条 collector 协程，ContentFilter 挂起窗口里 settle 可能抢先
+        // 清掉 pending 标志，等函数恢复后取值就是 false 了（回顶/焦点恢复意图丢失）
+        val requestedRestoreFocus = pendingHistoryReturnRestore
+        val requestedScrollToTop = pendingHistoryScrollToTop
         if (shouldSkipInitialEmptyEmission(videos.size)) {
             PagePerfLogger.markNow(pageTag(), "skip_empty_initial_history")
             return
@@ -443,8 +448,8 @@ class MeListFragment : BaseFragment<FragmentMeTabListBinding>(), MeTabPage, com.
             "raw=${videos.size} filtered=${filtered.size}"
         )
         lastRenderedHistorySignature = rawSignature
-        val shouldRestoreFocus = pendingHistoryReturnRestore && filtered.isNotEmpty()
-        val shouldScrollToTop = pendingHistoryScrollToTop && filtered.isNotEmpty()
+        val shouldRestoreFocus = requestedRestoreFocus && filtered.isNotEmpty()
+        val shouldScrollToTop = requestedScrollToTop && filtered.isNotEmpty()
         val applyStartMs = PagePerfLogger.now()
         if (pendingSilentHistoryRefresh && adapter.contentCount() > 0) {
             // 静默进度刷新：同序同 key 仅内容变，DiffUtil 只派发 onChanged 原位 rebind。
