@@ -225,6 +225,71 @@ class MeListViewModel(
         }
     }
 
+    /**
+     * 静默刷新「稍后观看」进度（从播放器返回时调用）：
+     * 与 [silentRefreshHistoryProgress] 同语义——重拉后按 itemKey 保序合并进现有列表，
+     * 只覆盖匹配项的进度等字段，顺序不变、不增不删，列表/焦点零扰动。失败静默吞。
+     */
+    fun silentRefreshLaterWatchProgress() {
+        if (!userRepository.isLoggedIn()) {
+            AppLog.d("MePerf", "silentRefreshLater: skip, not logged in")
+            return
+        }
+        if (_uiState.value.laterVideos.isEmpty()) {
+            AppLog.d("MePerf", "silentRefreshLater: skip, empty list")
+            return
+        }
+        if (_loading.value) {
+            AppLog.d("MePerf", "silentRefreshLater: skip, loading in flight")
+            return
+        }
+        silentRefreshJob?.cancel()
+        silentRefreshJob = viewModelScope.launch {
+            try {
+                val t0 = System.currentTimeMillis()
+                AppLog.d("MePerf", "silentRefreshLater: request")
+                val response = userRepository.getLaterWatch()
+                response
+                    .onSuccess { response ->
+                        // 期间正常加载已启动则丢弃，正常加载的结果更权威
+                        if (_loading.value) {
+                            AppLog.d("MePerf", "silentRefreshLater: drop, normal load took over")
+                            return@onSuccess
+                        }
+                        if (!response.isSuccess || response.data == null) {
+                            AppLog.e("MePerf", "silentRefreshLater: code=${response.code}")
+                            return@onSuccess
+                        }
+                        val current = _uiState.value.laterVideos
+                        if (current.isEmpty()) {
+                            AppLog.d("MePerf", "silentRefreshLater: drop, list cleared during request")
+                            return@onSuccess
+                        }
+                        val freshByKey = response.data.list.associateBy(::videoItemKey)
+                        val merged = current.map { freshByKey[videoItemKey(it)] ?: it }
+                        if (merged == current) {
+                            AppLog.d("MePerf", "silentRefreshLater: no diff, items=${merged.size}, cost=${System.currentTimeMillis() - t0}ms")
+                            return@onSuccess
+                        }
+                        val changed = merged.zip(current)
+                            .count { (new, old) -> new != old }
+                        AppLog.d("MePerf", "silentRefreshLater: applied, items=${merged.size}, changed=$changed, cost=${System.currentTimeMillis() - t0}ms")
+                        lastLaterPayloadSignature = videoListSignature(merged)
+                        _uiState.value = _uiState.value.copy(laterVideos = merged)
+                    }
+                    .onFailure { exception ->
+                        if (exception is CancellationException) {
+                            throw exception
+                        }
+                        AppLog.e("MePerf", "silentRefreshLater: failed, ${exception.message}")
+                    }
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                AppLog.e("MePerf", "silentRefreshLater: failed, ${t.message}")
+            }
+        }
+    }
+
     fun loadLaterWatch() {
         val requestId = nextRequestId(restart = true)
         loadJob = viewModelScope.launch {
@@ -346,15 +411,18 @@ class MeListViewModel(
         }
     }
 
+    private fun videoItemKey(item: VideoModel): String {
+        return when {
+            item.bvid.isNotBlank() -> "bvid:${item.bvid}"
+            item.aid > 0L -> "aid:${item.aid}"
+            else -> "title:${item.title}|cover:${item.coverUrl}"
+        }
+    }
+
     private fun videoListSignature(items: List<VideoModel>): String {
         if (items.isEmpty()) return "empty"
         return items.joinToString(separator = "|") { item ->
-            val key = when {
-                item.bvid.isNotBlank() -> "bvid:${item.bvid}"
-                item.aid > 0L -> "aid:${item.aid}"
-                else -> "title:${item.title}|cover:${item.coverUrl}"
-            }
-            "$key:${item.title.hashCode()}:${item.viewCount}:${item.danmakuCount}:${item.historyProgress}:${item.coverUrl.hashCode()}"
+            "${videoItemKey(item)}:${item.title.hashCode()}:${item.viewCount}:${item.danmakuCount}:${item.historyProgress}:${item.coverUrl.hashCode()}"
         }
     }
 }

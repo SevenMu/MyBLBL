@@ -108,6 +108,8 @@ class MeListFragment : BaseFragment<FragmentMeTabListBinding>(), MeTabPage, com.
     // 焦点恢复分支提前消费清零（早于 onResume），挂在它上面永远读不到 true
     private var pendingSilentHistoryRefresh = false
     private var pendingSilentHistoryReturn = false
+    private var pendingLaterSilentReturn = false
+    private var pendingLaterSilentRefresh = false
     // 静默刷新刚落地的时间：loadUserInfo 网络返回后 renderLoginState 补刷的 refresh
     // 到达时静默标志可能已消费清零，靠短冷却窗口继续让位
     private var lastSilentHistoryAppliedAtMs = 0L
@@ -253,6 +255,13 @@ class MeListFragment : BaseFragment<FragmentMeTabListBinding>(), MeTabPage, com.
             AppLog.d("MePerf", "[history] onResume: trigger silentRefreshHistoryProgress")
             viewModel.silentRefreshHistoryProgress()
         }
+        if (pendingLaterSilentReturn && type == TYPE_LATER && hasContentItems()) {
+            // 同 history：从播放器返回，静默合并只更新被看过卡片的进度
+            pendingLaterSilentReturn = false
+            pendingLaterSilentRefresh = true
+            AppLog.d("MePerf", "[later] onResume: trigger silentRefreshLaterWatchProgress")
+            viewModel.silentRefreshLaterWatchProgress()
+        }
         if (type == TYPE_HISTORY || type == TYPE_LATER) {
             val isLoggedIn = viewModel.isLoggedIn()
             if (isLoggedIn && !lastKnownLoggedIn) {
@@ -364,6 +373,9 @@ class MeListFragment : BaseFragment<FragmentMeTabListBinding>(), MeTabPage, com.
             return
         }
         pendingRestoreFocus = true
+        if (type == TYPE_LATER) {
+            pendingLaterSilentReturn = true
+        }
         tvFocusController?.captureCurrentAnchor()
         VideoRouteNavigator.openVideo(
             context = act,
@@ -560,6 +572,23 @@ class MeListFragment : BaseFragment<FragmentMeTabListBinding>(), MeTabPage, com.
         )
         lastRenderedLaterSignature = rawSignature
         val applyStartMs = PagePerfLogger.now()
+        if (pendingLaterSilentRefresh && adapter.contentCount() > 0) {
+            // 静默进度刷新：同序同 key 仅内容变，DiffUtil 只派发 onChanged 原位 rebind。
+            // 不走 FirstScreenRenderer（截首批+延迟补齐会让已渲染列表闪变），不回顶、不动焦点
+            pendingLaterSilentRefresh = false
+            lastSilentHistoryAppliedAtMs = android.os.SystemClock.elapsedRealtime()
+            AppLog.d("MeDebug", "[later] silentRefresh applied, items=${filtered.size}, raw=${videos.size}")
+            adapter.setData(filtered) {
+                PagePerfLogger.mark(
+                    pageTag(),
+                    "adapter_commit",
+                    applyStartMs,
+                    "items=${adapter.contentCount()}"
+                )
+            }
+            updateContentState(filtered.isEmpty())
+            return
+        }
         if (adapter.contentCount() == 0) {
             FirstScreenRenderer.render(
                 recyclerView = binding.recyclerView,
@@ -652,9 +681,16 @@ class MeListFragment : BaseFragment<FragmentMeTabListBinding>(), MeTabPage, com.
 
     private fun videoListSignature(videos: List<VideoModel>): String {
         if (videos.isEmpty()) return "empty"
-        val first = videos.first()
-        val last = videos.last()
-        return "${videos.size}:${first.bvid.ifBlank { first.aid.toString() }}:${first.title.hashCode()}:${last.bvid.ifBlank { last.aid.toString() }}:${last.title.hashCode()}"
+        // 全量逐项签名（与 MeListViewModel.videoListSignature 同构）：
+        // first/last 采样识别不到中间项的进度变化，会把静默刷新的新数据当重复丢弃
+        return videos.joinToString(separator = "|") { item ->
+            val key = when {
+                item.bvid.isNotBlank() -> "bvid:${item.bvid}"
+                item.aid > 0L -> "aid:${item.aid}"
+                else -> "title:${item.title}|cover:${item.coverUrl}"
+            }
+            "$key:${item.title.hashCode()}:${item.viewCount}:${item.danmakuCount}:${item.historyProgress}:${item.coverUrl.hashCode()}"
+        }
     }
 
     private fun skipDuplicatePayload(rawSize: Int) {
@@ -672,6 +708,8 @@ class MeListFragment : BaseFragment<FragmentMeTabListBinding>(), MeTabPage, com.
                 }
             }
             TYPE_LATER -> {
+                // 重复 payload 被跳过：静默刷新若已应用/无 diff，标志到此为止，别劫持下次正常刷新
+                pendingLaterSilentRefresh = false
                 if (pendingLaterScrollToTop) {
                     pendingLaterScrollToTop = false
                     val shouldFocusFirst = focusToFirstAfterScrollToTop
@@ -784,6 +822,8 @@ class MeListFragment : BaseFragment<FragmentMeTabListBinding>(), MeTabPage, com.
 
     override fun shouldDeferSessionRefresh(): Boolean =
         pendingSilentHistoryRefresh ||
+            pendingLaterSilentReturn ||
+            pendingLaterSilentRefresh ||
             (lastSilentHistoryAppliedAtMs > 0L && android.os.SystemClock.elapsedRealtime() - lastSilentHistoryAppliedAtMs < 2_500L)
 
     override fun refresh() {
@@ -793,6 +833,8 @@ class MeListFragment : BaseFragment<FragmentMeTabListBinding>(), MeTabPage, com.
         pendingHistoryReturnRestore = false
         pendingSilentHistoryReturn = false
         pendingSilentHistoryRefresh = false
+        pendingLaterSilentReturn = false
+        pendingLaterSilentRefresh = false
         lastSilentHistoryAppliedAtMs = 0L
         pendingHistoryScrollToTop = type == TYPE_HISTORY
         pendingLaterScrollToTop = type == TYPE_LATER
@@ -852,6 +894,8 @@ class MeListFragment : BaseFragment<FragmentMeTabListBinding>(), MeTabPage, com.
             }
             TYPE_LATER -> {
                 // 稍后再看：内容仍新鲜（未过 TTL）时保留滚动位置/焦点原样，不回顶重拉
+                pendingLaterSilentReturn = false
+                pendingLaterSilentRefresh = false
                 val listFresh = hasContentItems() &&
                         System.currentTimeMillis() - lastListLoadedAtMs < CACHE_TTL_MS
                 if (listFresh) {
