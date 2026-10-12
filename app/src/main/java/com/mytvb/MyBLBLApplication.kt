@@ -4,6 +4,7 @@ import android.app.Application
 import android.os.SystemClock
 import com.mytvb.core.common.cache.FileCacheManager
 import com.mytvb.core.common.log.AppLog
+import com.mytvb.core.common.media.VideoCodecSupport
 import com.mytvb.core.common.settings.AppSettingsDataStore
 import com.mytvb.core.common.update.ApkUpdater
 import com.mytvb.core.lifecycle.AppBackgroundMonitor
@@ -11,6 +12,7 @@ import com.mytvb.core.ui.image.ImageLoader
 import com.mytvb.di.appModules
 import com.mytvb.feature.home.RecommendFeedRepository
 import com.mytvb.feature.player.PlayerInstancePool
+import com.mytvb.feature.player.settings.PlayerSettingsStore
 import com.mytvb.network.NetworkManager
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
@@ -90,6 +92,11 @@ class MyBLBLApplication : Application() {
             AppLog.i(TAG, "STARTUP uiRuntimeInit start reason=$reason")
             // UI 首帧只需要 DI 和生命周期监听。设置缓存只启动异步读取，不再卡住 Main 首帧。
             trace("initKoin", startMs) { initKoin() }
+            // 解码方式偏好数据源：core 层解码器 selector/能力预检经此实时读取"软解视频"开关
+            // （读 AppSettings 内存缓存，settings 变更即刻反映，无需重建播放器池）。
+            VideoCodecSupport.softwareDecoderPreferenceSource = {
+                PlayerSettingsStore.isSoftwareDecoderEnabled()
+            }
             trace("startSettingsCacheAsync", startMs) { startSettingsCacheAsync() }
             trace("initBackgroundMonitor", startMs) { AppBackgroundMonitor.init(this) }
             uiRuntimeReady.set(true)

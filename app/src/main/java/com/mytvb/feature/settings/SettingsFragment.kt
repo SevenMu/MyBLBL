@@ -101,6 +101,8 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
         private const val KEY_AFTER_PLAY = "after_play"
         private const val KEY_PLAY_FINISH_EXIT_PLAYER = "play_finish_exit_player"
         private const val KEY_VIDEO_CODEC = "video_codec"
+        // 与 PlayerSettingsStore.KEY_SOFTWARE_VIDEO_DECODER 同键（存储值"开/关"）。
+        private const val KEY_SOFTWARE_VIDEO_DECODER = "software_video_decoder"
         private const val KEY_SUBTITLE_DEFAULT_MODE = "subtitle_default_mode"
         private const val KEY_SUBTITLE_TEXT_SIZE = "subtitle_text_size"
         private const val KEY_SHOW_VIDEO_DETAIL = "show_video_detail"
@@ -150,6 +152,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
         private const val KEY_SCREEN_RESOLUTION = "info_screen_resolution"
         private const val KEY_WINDOW_METRICS = "info_window_metrics"
         private const val KEY_CODEC = "info_codec"
+        private const val KEY_CODEC_INFO = "info_codec_detail"
 
         /**
          * 主题存储值数组（历史落盘格式为中文字面量，toLegacyTheme/toThemeName 依赖）。
@@ -291,7 +294,8 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
                 stored(KEY_AUDIO_BALANCE, R.string.audio_balance, "中"),
                 stored(KEY_DEFAULT_PLAY_SPEED, R.string.default_play_speed, "1.0"),
                 stored(KEY_MUSIC_ZONE_NORMAL_SPEED, R.string.music_zone_normal_speed, "关"),
-                stored(KEY_VIDEO_CODEC, R.string.video_codec, "HEVC")
+                stored(KEY_VIDEO_CODEC, R.string.video_codec, VideoCodecSupport.defaultPreferredCodec(requireContext()).name),
+                stored(KEY_SOFTWARE_VIDEO_DECODER, R.string.software_video_decoder, "关")
             )),
             SettingGroup(R.string.setting_group_play_behavior, listOf(
                 stored(KEY_RESUME_PLAYBACK, R.string.resume_playback, "开"),
@@ -373,7 +377,8 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
                 plain(KEY_CPU_ABI, R.string.cpu_arch, Build.SUPPORTED_ABIS.firstOrNull() ?: "unknown"),
                 plain(KEY_SCREEN_RESOLUTION, R.string.screen_resolution, ScreenUtils.getRealScreenInfo(requireContext()).toString()),
                 plain(KEY_WINDOW_METRICS, R.string.window_metrics, buildWindowMetricsValue()),
-                plain(KEY_CODEC, R.string.hardware_decode, "")
+                plain(KEY_CODEC, R.string.hardware_decode, ""),
+                plain(KEY_CODEC_INFO, R.string.codec_info, "")
             ))
         )
 
@@ -611,6 +616,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
             KEY_DEFAULT_PLAY_SPEED -> showPlayerChoiceDialog(key, arrayOf("0.25", "0.5", "0.75", "1.0", "1.25", "1.5", "2.0", "3.0"))
             KEY_MUSIC_ZONE_NORMAL_SPEED -> toggle(key)
             KEY_VIDEO_CODEC -> showPlayerChoiceDialog(key, arrayOf("AVC", "HEVC", "AV1"))
+            KEY_SOFTWARE_VIDEO_DECODER -> toggle(key)
             // —— 播放·播放行为 ——
             KEY_RESUME_PLAYBACK -> toggle(key)
             KEY_AFTER_PLAY -> showPlayerChoiceDialog(key, arrayOf("什么都不做", "播推荐视频", "播列表中的下一个", "播放合集中的下一个"))
@@ -673,6 +679,10 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
             KEY_DEBUG_LOG -> {
                 val activity = activity as? MainActivity
                 activity?.openOverlayFragment(DebugLogFragment.newInstance(), "debug_log")
+            }
+            KEY_CODEC_INFO -> {
+                val activity = activity as? MainActivity
+                activity?.openOverlayFragment(CodecInfoFragment.newInstance(), "codec_info")
             }
         }
     }
@@ -1366,6 +1376,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
         applyStored(KEY_DEFAULT_PLAY_SPEED)
         applyStored(KEY_MUSIC_ZONE_NORMAL_SPEED)
         applyStored(KEY_VIDEO_CODEC)
+        applyStored(KEY_SOFTWARE_VIDEO_DECODER)
         // —— 播放：播放行为 ——
         applyStored(KEY_RESUME_PLAYBACK)
         applyStored(KEY_AFTER_PLAY)

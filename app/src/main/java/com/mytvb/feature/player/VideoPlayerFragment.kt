@@ -773,6 +773,16 @@ class VideoPlayerFragment : Fragment() {
                 playerView.showHideSettingView(false)
             }
 
+            override fun onSoftwareDecoderChange(enabled: Boolean) {
+                val playbackSnapshot = capturePlaybackSnapshot()
+                viewModel.setSoftwareDecoderEnabled(
+                    enabled = enabled,
+                    currentPositionMs = playbackSnapshot.first,
+                    playWhenReady = playbackSnapshot.second
+                )
+                playerView.showHideSettingView(false)
+            }
+
             override fun onAspectRatioChange(ratio: Int) {
             }
 
@@ -1079,6 +1089,12 @@ class VideoPlayerFragment : Fragment() {
                 launch {
                     viewModel.selectedVideoCodec.collect { codec ->
                         codec?.let(playerView::selectVideoCodec)
+                    }
+                }
+
+                launch {
+                    viewModel.softwareDecoderEnabled.collect { enabled ->
+                        playerView.setSoftwareDecoderEnabled(enabled)
                     }
                 }
 

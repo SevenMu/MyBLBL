@@ -415,6 +415,14 @@
     <string name="up_info">UP主信息</string>
     <string name="user">用户</string>
     <string name="video_codec">视频编码</string>
+    <string name="software_video_decoder">软解视频</string>
+    <string name="codec_info">编解码信息</string>
+    <string name="codec_decoder_hardware">硬解</string>
+    <string name="codec_decoder_software">软解</string>
+    <string name="codec_info_model_format">型号：%1$s</string>
+    <string name="codec_info_chip_format">芯片：%1$s</string>
+    <string name="codec_info_system_format">系统：Android %1$s（SDK %2$d）</string>
+    <string name="codec_info_default_codec_format">默认视频编码：%1$s</string>
     <string name="ipv4_only">仅使用IPv4</string>
     <string name="douyin_mode">上下滑切换视频</string>
     <string name="video_info">视频信息</string>

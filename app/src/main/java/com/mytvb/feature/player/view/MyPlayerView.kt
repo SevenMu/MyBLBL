@@ -2534,6 +2534,10 @@ class MyPlayerView @JvmOverloads constructor(
         settingView?.setCurrentVideoCodec(videoCodec)
     }
 
+    fun setSoftwareDecoderEnabled(enabled: Boolean) {
+        settingView?.setSoftwareDecoderEnabled(enabled)
+    }
+
     fun selectSubtitle(position: Int) {
         settingView?.setCurrentSubtitlePosition(position)
     }

@@ -1,6 +1,7 @@
 package com.mytvb.feature.player.settings
 
 import android.content.Context
+import com.mytvb.core.common.media.VideoCodecSupport
 import com.mytvb.core.common.settings.AppSettingsDataStore
 import com.mytvb.model.video.quality.AudioQuality
 import com.mytvb.model.video.quality.VideoCodecEnum
@@ -70,6 +71,8 @@ object PlayerSettingsStore {
     private const val KEY_DEFAULT_AUDIO_TRACK = "default_audio_track"
     private const val KEY_DEFAULT_PLAY_SPEED = "default_play_speed"
     private const val KEY_VIDEO_CODEC = "video_codec"
+    // 与 SettingsFragment.KEY_SOFTWARE_VIDEO_DECODER 同键；存储值"开/关"（parseToggle 口径）。
+    const val KEY_SOFTWARE_VIDEO_DECODER = "software_video_decoder"
     private const val KEY_AFTER_PLAY = "after_play"
     private const val KEY_PLAY_FINISH_EXIT_PLAYER = "play_finish_exit_player"
     private const val KEY_SUBTITLE_DEFAULT_MODE = "subtitle_default_mode"
@@ -158,7 +161,8 @@ object PlayerSettingsStore {
                 ?.takeIf { it > 0f }
                 ?: 1.0f,
             defaultVideoCodec = parseVideoCodec(
-                readSetting(KEY_VIDEO_CODEC)
+                readSetting(KEY_VIDEO_CODEC),
+                context
             ),
             afterPlayMode = when (readSetting(KEY_AFTER_PLAY)) {
                 "什么都不做" -> AfterPlayMode.NOTHING
@@ -305,14 +309,27 @@ object PlayerSettingsStore {
         }
     }
 
-    private fun parseVideoCodec(value: String?): VideoCodecEnum? {
+    private fun parseVideoCodec(value: String?, context: Context): VideoCodecEnum? {
         return when (value?.trim()?.uppercase()) {
-            null, "" -> VideoCodecEnum.HEVC
+            null, "" -> VideoCodecSupport.defaultPreferredCodec(context)
             "AVC", "H.264", "H264" -> VideoCodecEnum.AVC
             "HEVC", "H.265", "H265" -> VideoCodecEnum.HEVC
             "AV1" -> VideoCodecEnum.AV1
-            else -> VideoCodecEnum.HEVC
+            else -> VideoCodecSupport.defaultPreferredCodec(context)
         }
+    }
+
+    // ===== 解码方式（硬解优先 / 软解） =====
+
+    /**
+     * 软解开关（实时读内存缓存，播放器 selector/能力预检每次询问都会调用）。
+     * 未设置过视为"关"= 硬解优先。
+     */
+    fun isSoftwareDecoderEnabled(): Boolean =
+        appSettings.getCachedString(KEY_SOFTWARE_VIDEO_DECODER) == "开"
+
+    fun saveSoftwareDecoderEnabled(enabled: Boolean) {
+        appSettings.putStringAsync(KEY_SOFTWARE_VIDEO_DECODER, if (enabled) "开" else "关")
     }
 
     private fun parseToggle(value: String?, defaultValue: Boolean): Boolean {

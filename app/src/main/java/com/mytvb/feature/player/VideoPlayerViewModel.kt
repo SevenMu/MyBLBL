@@ -364,7 +364,19 @@ class VideoPlayerViewModel(
     private val cdnPreconnector = CdnPreconnector(playerOkHttpClient)
     private val streamResolver = VideoPlayerStreamResolver(
         dataSourceFactory = dataSourceFactory,
-        urlNormalizer = VideoPlayerUrlUtils::normalizeUrl
+        urlNormalizer = VideoPlayerUrlUtils::normalizeUrl,
+        // 起播能力预检：与播放选择器同语义的 supportsFormat 判定（见 VideoCodecSupport），
+        // 判定不可解的编码在候选列表后置；查询异常保守按可解处理。
+        isCodecDecodable = { track ->
+            VideoCodecSupport.isVideoTrackDecodable(
+                context = appContext,
+                mimeType = track.realMimeType,
+                codecs = track.codecs,
+                width = track.width,
+                height = track.height,
+                frameRate = track.realFrameRate.toFloatOrNull() ?: 0f
+            )
+        }
     )
     private val dashMediaSourceFactory = VideoPlayerDashMediaSourceFactory(
         dataSourceFactory = cacheDataSourceFactory,
@@ -465,6 +477,9 @@ class VideoPlayerViewModel(
 
     private val _selectedVideoCodec = MutableStateFlow<VideoCodecEnum?>(null)
     val selectedVideoCodec: StateFlow<VideoCodecEnum?> = _selectedVideoCodec
+
+    private val _softwareDecoderEnabled = MutableStateFlow(PlayerSettingsStore.isSoftwareDecoderEnabled())
+    val softwareDecoderEnabled: StateFlow<Boolean> = _softwareDecoderEnabled
 
 
 
@@ -1232,6 +1247,24 @@ class VideoPlayerViewModel(
     ) {
         requestedCodec = codec
         _selectedVideoCodec.value = codec
+        capturePlaybackSnapshot(currentPositionMs, playWhenReady)
+        rebuildPlayback()
+    }
+
+    /**
+     * 切换解码方式（硬解优先 / 软解）并带位置重建播放。
+     *
+     * 已打开的解码器不会中途更换，重建后 player 重新 prepare 会经
+     * VideoCodecSupport.videoCodecSelector 重新选择解码器（带当前位置续播）。
+     */
+    fun setSoftwareDecoderEnabled(
+        enabled: Boolean,
+        currentPositionMs: Long,
+        playWhenReady: Boolean
+    ) {
+        PlayerSettingsStore.saveSoftwareDecoderEnabled(enabled)
+        _softwareDecoderEnabled.value = enabled
+        AppLog.i(TAG, "software_decoder_switch enabled=$enabled pos=${currentPositionMs}ms")
         capturePlaybackSnapshot(currentPositionMs, playWhenReady)
         rebuildPlayback()
     }

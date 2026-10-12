@@ -83,6 +83,7 @@ class MyPlayerSettingView @JvmOverloads constructor(
         internal const val ITEM_LIVE_QUALITY = 8
         internal const val ITEM_LIVE_LINE = 11
         internal const val ITEM_SCREEN_MIRROR = 9
+        internal const val ITEM_DECODER_MODE = 12
         internal const val ITEM_DM_ENABLE = 101
         internal const val ITEM_DM_ALPHA = 102
         internal const val ITEM_DM_TEXT_SIZE = 103
@@ -501,6 +502,12 @@ class MyPlayerSettingView @JvmOverloads constructor(
         refreshCurrentMenuInPlace()
     }
 
+    /** 宿主注入软解开关当前值（设置页修改后回到播放页也能反映）。 */
+    fun setSoftwareDecoderEnabled(enabled: Boolean) {
+        updateState { it.copy(softwareDecoderEnabled = enabled) }
+        refreshCurrentMenuInPlace()
+    }
+
     fun setOnPlayerSettingChange(listener: OnPlayerSettingChange?) {
         onPlayerSettingChange = listener
     }
@@ -540,6 +547,19 @@ class MyPlayerSettingView @JvmOverloads constructor(
             ITEM_AFTER_PLAY -> showAfterPlayMenu()
             ITEM_SUBTITLE -> showSubtitles()
             ITEM_VIDEO_CODEC -> showVideoCodecMenu()
+            ITEM_DECODER_MODE -> {
+                // 解码方式即时切（硬解优先 ↔ 软解）：持久化与带位置重建由宿主回调完成。
+                val newValue = !panelState.softwareDecoderEnabled
+                updateState { it.copy(softwareDecoderEnabled = newValue) }
+                onPlayerSettingChange?.onSoftwareDecoderChange(newValue)
+                val label = if (newValue) context.getString(R.string.on) else context.getString(R.string.off)
+                Toast.makeText(
+                    context,
+                    "${context.getString(R.string.software_video_decoder)}：$label",
+                    Toast.LENGTH_SHORT
+                ).show()
+                refreshCurrentMenuInPlace()
+            }
             ITEM_AUDIO_QUALITY -> showAudioQualityMenu()
             ITEM_ASPECT_RATIO -> showScreenRatioMenu()
             ITEM_DM_SETTING -> showDmSettingMenu()

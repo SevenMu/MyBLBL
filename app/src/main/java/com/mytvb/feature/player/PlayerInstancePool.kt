@@ -286,13 +286,20 @@ object PlayerInstancePool {
                 setEnableDecoderFallback(true)
                 setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
 
+                // 解码方式（硬解优先 / 软解）：与能力预检共用同一 selector（见
+                // VideoCodecSupport.videoCodecSelector），软解开关打开时 video/* 走
+                // PREFER_SOFTWARE、失败可回退硬解（fallback 已开启）。selector 在每次
+                // 解码器选择（起播/换轨/重建）时实时读取开关，切换后无需重建播放器池。
+                setMediaCodecSelector(VideoCodecSupport.videoCodecSelector())
+
                 // 构建期可观测性：记录检测到的硬解集合，便于诊断"是否落到软解"。
                 // getHardwareSupportedCodecs 已有缓存与后台预热，此处为常量时间。
                 val hwCodecs = runCatching { VideoCodecSupport.getHardwareSupportedCodecs() }
                     .getOrDefault(emptySet())
                 AppLog.i(
                     TAG,
-                    "renderers_factory built extensionMode=PREFER fallback=true hwCodecs=$hwCodecs"
+                    "renderers_factory built extensionMode=PREFER fallback=true " +
+                        "softDecoderPreferred=${VideoCodecSupport.isSoftwareDecoderPreferred()} hwCodecs=$hwCodecs"
                 )
             }
 

@@ -1045,6 +1045,11 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
                 viewModel.selectVideoCodec(codec = codec, currentPositionMs = snapshot.first, playWhenReady = snapshot.second)
                 playerView.showHideSettingView(false)
             }
+            override fun onSoftwareDecoderChange(enabled: Boolean) {
+                val snapshot = capturePlaybackSnapshot()
+                viewModel.setSoftwareDecoderEnabled(enabled = enabled, currentPositionMs = snapshot.first, playWhenReady = snapshot.second)
+                playerView.showHideSettingView(false)
+            }
             override fun onAspectRatioChange(ratio: Int) {}
             override fun onScreenMirrorChange(enabled: Boolean) {
                 playerView.setMirrorEnabled(enabled)
