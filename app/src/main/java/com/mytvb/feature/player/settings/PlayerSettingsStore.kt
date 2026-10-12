@@ -33,6 +33,8 @@ data class PlayerSettings(
     val subtitlePreferredLan: String = "",
     val subtitleTextSizePx: Int = 45,
     val showBottomProgressBar: Boolean = false,
+    // 播放页左下角「N人正在看」浮层：关闭后不拉取在线人数也不显示。默认开。
+    val showOnlineWatching: Boolean = true,
     val simpleKeyPress: Boolean = false,
     val showRewindFastForward: Boolean = false,
     val showNextPrevious: Boolean = false,
@@ -73,6 +75,8 @@ object PlayerSettingsStore {
     private const val KEY_VIDEO_CODEC = "video_codec"
     // 与 SettingsFragment.KEY_SOFTWARE_VIDEO_DECODER 同键；存储值"开/关"（parseToggle 口径）。
     const val KEY_SOFTWARE_VIDEO_DECODER = "software_video_decoder"
+    // 与 SettingsFragment.KEY_SHOW_ONLINE_WATCHING 同键；存储值"开/关"（parseToggle 口径），默认开。
+    const val KEY_SHOW_ONLINE_WATCHING = "show_online_watching"
     private const val KEY_AFTER_PLAY = "after_play"
     private const val KEY_PLAY_FINISH_EXIT_PLAYER = "play_finish_exit_player"
     private const val KEY_SUBTITLE_DEFAULT_MODE = "subtitle_default_mode"
@@ -189,6 +193,10 @@ object PlayerSettingsStore {
             showBottomProgressBar = parseToggle(
                 readSetting(KEY_SHOW_BOTTOM_PROGRESS_BAR),
                 defaultValue = false
+            ),
+            showOnlineWatching = parseToggle(
+                readSetting(KEY_SHOW_ONLINE_WATCHING),
+                defaultValue = true
             ),
             simpleKeyPress = parseToggle(
                 readSetting(KEY_SIMPLE_KEY_PRESS),

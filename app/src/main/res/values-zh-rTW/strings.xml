@@ -279,6 +279,7 @@
     <string name="user">使用者</string>
     <string name="video_codec">影片編碼</string>
     <string name="software_video_decoder">軟解影片</string>
+    <string name="show_online_watching">顯示觀看人數</string>
     <string name="codec_info">編解碼資訊</string>
     <string name="codec_decoder_hardware">硬解</string>
     <string name="codec_decoder_software">軟解</string>

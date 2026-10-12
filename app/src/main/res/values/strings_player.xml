@@ -98,6 +98,9 @@
     <string name="series_error_recommend_failed">推荐加载失败</string>
     <string name="player_hdr_unsupported_hint">电视或播放设备可能不支持「%1$s」，若播放异常请切回其他画质</string>
 
+    <!-- 同时观看人数 / Online watching count -->
+    <string name="online_watching_format">%1$s人正在看</string>
+
     <!-- 视频评论 / Video comments -->
     <string name="player_comment_title">评论</string>
     <string name="player_comment_title_with_count_format">评论(%1$s)</string>

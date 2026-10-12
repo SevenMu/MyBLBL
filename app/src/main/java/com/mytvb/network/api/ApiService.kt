@@ -27,6 +27,7 @@ import com.mytvb.model.video.RegionVideoListWrapper
 import com.mytvb.model.video.UserDynamicResponse
 import com.mytvb.model.video.AllDynamicResponse
 import com.mytvb.model.video.GetVideoByChannelWrapper
+import com.mytvb.model.player.OnlineTotalModel
 import com.mytvb.model.player.PgcV2Result
 import com.mytvb.model.player.PlayInfoModel
 import com.mytvb.model.player.VideoSnapshotData
@@ -185,6 +186,12 @@ interface ApiService {
         @Query("avid") avid: Long?,
         @Query("bvid") bvid: String?
     ): BaseResponse<List<VideoPvModel>>
+
+    @GET("x/player/online/total")
+    suspend fun getOnlineTotal(
+        @Query("bvid") bvid: String?,
+        @Query("cid") cid: Long
+    ): BaseResponse<OnlineTotalModel>
 
     @GET("x/player/playurl")
     suspend fun getVideoPlayInfo(

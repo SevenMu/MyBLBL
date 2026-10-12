@@ -416,6 +416,7 @@
     <string name="user">用户</string>
     <string name="video_codec">视频编码</string>
     <string name="software_video_decoder">软解视频</string>
+    <string name="show_online_watching">显示观看人数</string>
     <string name="codec_info">编解码信息</string>
     <string name="codec_decoder_hardware">硬解</string>
     <string name="codec_decoder_software">软解</string>

@@ -278,6 +278,7 @@
     <string name="user">User</string>
     <string name="video_codec">Video codec</string>
     <string name="software_video_decoder">Software decoding</string>
+    <string name="show_online_watching">Show viewer count</string>
     <string name="codec_info">Codec info</string>
     <string name="codec_decoder_hardware">HW</string>
     <string name="codec_decoder_software">SW</string>

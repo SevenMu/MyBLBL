@@ -4,6 +4,7 @@ package com.mytvb.feature.player
 
 import com.mytvb.core.common.json.GsonHolder
 import android.content.Context
+import android.os.SystemClock
 import com.mytvb.R
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
@@ -53,6 +54,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import okhttp3.CacheControl
@@ -91,6 +93,8 @@ class VideoPlayerViewModel(
         private const val TAG = "VideoPlayerViewModel"
         private const val FIRST_FRAME_DEFERRED_WORK_DELAY_MS = 250L
         private const val FIRST_FRAME_SPONSOR_LOAD_DELAY_MS = 1_500L
+        private const val ONLINE_WATCHING_REFRESH_MS = 60_000L
+        private const val ONLINE_WATCHING_TICK_MS = 1_000L
 
         const val SAVED_AID = "saved_player_aid"
         const val SAVED_BVID = "saved_player_bvid"
@@ -432,6 +436,10 @@ class VideoPlayerViewModel(
     private val _currentPosition = MutableStateFlow(0L)
     val currentPosition: StateFlow<Long> = _currentPosition
 
+    /** 「N人正在看」文案（服务端预格式化，如 "9.4万+"）；null 表示不显示。 */
+    private val _onlineWatching = MutableStateFlow<String?>(null)
+    val onlineWatching: StateFlow<String?> = _onlineWatching
+
     private val sponsorBlockUseCase = SponsorBlockUseCase()
 
     sealed interface SponsorSkipUiState {
@@ -562,6 +570,7 @@ class VideoPlayerViewModel(
 
     private var currentAid: Long? = null
     private var currentBvid: String? = null
+    private var onlineWatchingObserverStarted = false
     private var currentCid: Long = 0L
     private var currentSeasonId: Long? = null
     private var currentEpId: Long? = null
@@ -830,6 +839,59 @@ class VideoPlayerViewModel(
         )
     }
 
+    /**
+     * 启动「N人正在看」观察者（幂等）。
+     *
+     * 每秒检查一次当前 (bvid, cid)：变化时立即拉取（换视频/切集），同一视频播放期间
+     * 每 [ONLINE_WATCHING_REFRESH_MS] 刷新一次。任何失败静默处理，绝不影响播放。
+     */
+    private fun ensureOnlineWatchingObserver() {
+        if (onlineWatchingObserverStarted) return
+        onlineWatchingObserverStarted = true
+        viewModelScope.launch {
+            var lastKey: String? = null
+            var lastFetchMs = 0L
+            while (isActive) {
+                val bvid = currentBvid
+                val cid = currentCid
+                // 「显示观看人数」关闭时不显示：清空并跳过拉取（读内存缓存单键，设置变更即时感知）。
+                val watchingEnabled =
+                    appSettings.getCachedString(PlayerSettingsStore.KEY_SHOW_ONLINE_WATCHING) != "关"
+                if (bvid.isNullOrBlank() || cid <= 0L || !watchingEnabled) {
+                    if (lastKey != null) {
+                        lastKey = null
+                        _onlineWatching.value = null
+                    }
+                } else {
+                    val key = "$bvid#$cid"
+                    val now = SystemClock.elapsedRealtime()
+                    if (key != lastKey) {
+                        lastKey = key
+                        _onlineWatching.value = null
+                        lastFetchMs = now
+                        fetchOnlineWatching(bvid, cid)
+                    } else if (now - lastFetchMs >= ONLINE_WATCHING_REFRESH_MS) {
+                        lastFetchMs = now
+                        fetchOnlineWatching(bvid, cid)
+                    }
+                }
+                delay(ONLINE_WATCHING_TICK_MS)
+            }
+        }
+    }
+
+    private suspend fun fetchOnlineWatching(bvid: String, cid: Long) {
+        runCatching { apiService.getOnlineTotal(bvid = bvid, cid = cid) }
+            .onSuccess { response ->
+                val text = if (response.isSuccess) response.data?.displayText() else null
+                _onlineWatching.value = text
+                AppLog.i(TAG, "online_watching fetch bvid=$bvid cid=$cid code=${response.code} text=$text")
+            }
+            .onFailure { throwable ->
+                AppLog.i(TAG, "online_watching fetch failed bvid=$bvid cid=$cid err=${throwable.message}")
+            }
+    }
+
     fun loadVideoInfo(
         aid: Long? = null,
         bvid: String? = null,
@@ -846,6 +908,7 @@ class VideoPlayerViewModel(
         preferLastPlayTime: Boolean? = null,
         playbackIntentId: String = UUID.randomUUID().toString()
     ) {
+        ensureOnlineWatchingObserver()
         startPlayback(
             PlaybackStartIntent(
                 id = playbackIntentId,

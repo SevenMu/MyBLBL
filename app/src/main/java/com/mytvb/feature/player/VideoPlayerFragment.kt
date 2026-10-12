@@ -138,6 +138,10 @@ class VideoPlayerFragment : Fragment() {
     private lateinit var playerView: MyPlayerView
     private lateinit var bottomProgressBar: SponsorProgressMarkerView
     private lateinit var textSubtitle: TextView
+    private lateinit var viewOnlineWatching: View
+    private lateinit var textOnlineWatching: TextView
+    private var latestOnlineWatchingText: String? = null
+    private var lastOnlineWatchingShown: Boolean? = null
     private lateinit var viewNext: View
     private lateinit var viewRelated: View
     private lateinit var recyclerViewRelated: RecyclerView
@@ -489,6 +493,8 @@ class VideoPlayerFragment : Fragment() {
         textSubtitle = binding.textSubtitle
         // 字幕有独立字号设置，不与 UI 文字缩放叠加
         ScaledTextView.exempt(textSubtitle)
+        viewOnlineWatching = binding.viewOnlineWatching
+        textOnlineWatching = binding.textOnlineWatching
         viewNext = binding.viewNext
         viewRelated = binding.viewRelated
         recyclerViewRelated = binding.recyclerViewRelated
@@ -1018,6 +1024,13 @@ class VideoPlayerFragment : Fragment() {
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 launch {
+                    viewModel.onlineWatching.collect { text ->
+                        latestOnlineWatchingText = text
+                        renderOnlineWatching()
+                    }
+                }
+
+                launch {
                     viewModel.riskControlVVoucher.collect { vVoucher ->
                         if (vVoucher.isNullOrBlank()) return@collect
                         viewModel.consumeRiskControlVVoucher() ?: return@collect
@@ -1377,6 +1390,36 @@ class VideoPlayerFragment : Fragment() {
             }
         }
         renderBottomProgressBar()
+        renderOnlineWatching()
+    }
+
+    /**
+     * 「N人正在看」浮层：数据非空且控制层完全收起（GONE）时显示在左下角，
+     * 与常驻细进度条同一时机；控制层展开时隐藏，避免与控制栏内容重叠。
+     */
+    private fun renderOnlineWatching() {
+        if (!::viewOnlineWatching.isInitialized) return
+        val text = latestOnlineWatchingText
+        val show = ::playerSettings.isInitialized && playerSettings.showOnlineWatching &&
+            !text.isNullOrBlank() && latestControllerVisibility == View.GONE
+        if (show != lastOnlineWatchingShown) {
+            lastOnlineWatchingShown = show
+            AppLog.d(TAG, "online_watching render text=$text visibility=$latestControllerVisibility show=$show")
+        }
+        // 有常驻细进度条时抬到进度条上方一点点；无进度条时贴底（对齐官方无条时的高度）。
+        val slimBarVisible = ::bottomProgressBar.isInitialized && bottomProgressBar.isVisible
+        val marginRes = if (slimBarVisible) R.dimen.px7 else R.dimen.px3
+        (viewOnlineWatching.layoutParams as? FrameLayout.LayoutParams)?.let { params ->
+            val targetMargin = resources.getDimensionPixelSize(marginRes)
+            if (params.bottomMargin != targetMargin) {
+                params.bottomMargin = targetMargin
+                viewOnlineWatching.layoutParams = params
+            }
+        }
+        viewOnlineWatching.isVisible = show
+        if (show) {
+            textOnlineWatching.text = getString(R.string.online_watching_format, text)
+        }
     }
 
     private fun renderBottomProgressBar() {
