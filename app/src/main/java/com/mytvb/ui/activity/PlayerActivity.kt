@@ -229,6 +229,7 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
     private val appEventHub: AppEventHub by inject()
     private val videoRepository: com.mytvb.repository.VideoRepository by inject()
     private val douyinModeManager: DouyinModeManager by inject()
+    private val personalFeedPrewarmer: com.mytvb.repository.PersonalFeedPrewarmer by inject()
 
     override fun getViewBinding(): FragmentVideoPlayerBinding {
         val startMs = SystemClock.elapsedRealtime()
@@ -580,6 +581,9 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // 进入播放会话即作废「我的」预取缓存（历史/稍后观看；本次进程内永久失效，prewarm 只跑一次）：
+        // 播放会推进服务端历史，启动时预取的旧快照若被消费会把新进度顶回旧的
+        personalFeedPrewarmer.invalidatePlaybackSensitiveCache()
         installMainThreadJankMonitor()
         handleIntent(intent)
     }

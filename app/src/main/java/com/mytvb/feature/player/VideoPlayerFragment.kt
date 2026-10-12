@@ -117,6 +117,7 @@ class VideoPlayerFragment : Fragment() {
     private val binding get() = _binding!!
 
     private val appEventHub: AppEventHub by inject()
+    private val personalFeedPrewarmer: com.mytvb.repository.PersonalFeedPrewarmer by inject()
     private val viewModel: VideoPlayerViewModel by viewModel()
 
     private var player: ExoPlayer? = null
@@ -425,6 +426,9 @@ class VideoPlayerFragment : Fragment() {
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        // 进入播放会话即作废「我的」预取缓存（本次进程内永久失效，prewarm 只跑一次）：
+        // 本次播放会推进服务端历史，启动时预取的旧快照若被消费会把新进度顶回旧的
+        personalFeedPrewarmer.invalidatePlaybackSensitiveCache()
         initViews(view)
         playerSettings = PlayerSettingsStore.load(requireContext())
         uiCoordinator.addListener(coordinatorStateListener)
