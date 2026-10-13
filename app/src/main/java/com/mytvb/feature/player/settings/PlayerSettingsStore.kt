@@ -35,6 +35,8 @@ data class PlayerSettings(
     val showBottomProgressBar: Boolean = false,
     // 播放页左下角「N人正在看」浮层：关闭后不拉取在线人数也不显示。默认开。
     val showOnlineWatching: Boolean = true,
+    // 直播 SC（醒目留言）左侧卡片队列：关闭后 WS 仍接收但不显示。默认开。
+    val showLiveSuperChat: Boolean = true,
     val simpleKeyPress: Boolean = false,
     val showRewindFastForward: Boolean = false,
     val showNextPrevious: Boolean = false,
@@ -77,6 +79,8 @@ object PlayerSettingsStore {
     const val KEY_SOFTWARE_VIDEO_DECODER = "software_video_decoder"
     // 与 SettingsFragment.KEY_SHOW_ONLINE_WATCHING 同键；存储值"开/关"（parseToggle 口径），默认开。
     const val KEY_SHOW_ONLINE_WATCHING = "show_online_watching"
+    // 与 SettingsFragment.KEY_SHOW_LIVE_SUPER_CHAT 同键；存储值"开/关"（parseToggle 口径），默认开。
+    const val KEY_SHOW_LIVE_SUPER_CHAT = "show_live_super_chat"
     private const val KEY_AFTER_PLAY = "after_play"
     private const val KEY_PLAY_FINISH_EXIT_PLAYER = "play_finish_exit_player"
     private const val KEY_SUBTITLE_DEFAULT_MODE = "subtitle_default_mode"
@@ -149,6 +153,8 @@ object PlayerSettingsStore {
             append(readSetting(KEY_AUDIO_BALANCE).orEmpty())
             append("|")
             append(readSetting(KEY_SEAMLESS_QUALITY_SWITCH).orEmpty())
+            append("|")
+            append(readSetting(KEY_SHOW_LIVE_SUPER_CHAT).orEmpty())
         }
         if (snapshot == lastSettingsSnapshot) {
             return cachedSettings!!
@@ -196,6 +202,10 @@ object PlayerSettingsStore {
             ),
             showOnlineWatching = parseToggle(
                 readSetting(KEY_SHOW_ONLINE_WATCHING),
+                defaultValue = true
+            ),
+            showLiveSuperChat = parseToggle(
+                readSetting(KEY_SHOW_LIVE_SUPER_CHAT),
                 defaultValue = true
             ),
             simpleKeyPress = parseToggle(
@@ -271,6 +281,14 @@ object PlayerSettingsStore {
         if (cachedSettings?.subtitlePreferredLan == normalized) return
         appSettings.putStringAsync(KEY_SUBTITLE_PREFERRED_LAN, normalized)
         cachedSettings = cachedSettings?.copy(subtitlePreferredLan = normalized)
+        lastSettingsSnapshot = null
+    }
+
+    /** 播放页 SC 开关按钮切换即时落盘（存储值「开/关」，与设置页 toggle 同口径）。 */
+    fun saveShowLiveSuperChat(enabled: Boolean) {
+        if (cachedSettings?.showLiveSuperChat == enabled) return
+        appSettings.putStringAsync(KEY_SHOW_LIVE_SUPER_CHAT, if (enabled) "开" else "关")
+        cachedSettings = cachedSettings?.copy(showLiveSuperChat = enabled)
         lastSettingsSnapshot = null
     }
 

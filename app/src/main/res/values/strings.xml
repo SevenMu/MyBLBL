@@ -95,6 +95,7 @@
     <string name="dm_setting">弹幕设置</string>
     <string name="dm_speed">弹幕速度</string>
     <string name="dm_switch">弹幕开关</string>
+    <string name="sc_switch">SC醒目留言开关</string>
     <string name="dm_track_spacing">弹幕行距</string>
     <string name="resume_playback">恢复播放进度</string>
     <string name="dm_text_size">弹幕字体大小</string>
@@ -416,6 +417,7 @@
     <string name="video_codec">视频编码</string>
     <string name="software_video_decoder">软解视频</string>
     <string name="show_online_watching">显示观看人数</string>
+    <string name="show_live_super_chat">SC 醒目留言</string>
     <string name="codec_info">编解码信息</string>
     <string name="codec_decoder_hardware">硬解</string>
     <string name="codec_decoder_software">软解</string>

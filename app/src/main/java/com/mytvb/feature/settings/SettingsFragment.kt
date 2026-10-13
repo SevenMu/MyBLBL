@@ -106,6 +106,8 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
         private const val KEY_SOFTWARE_VIDEO_DECODER = "software_video_decoder"
         // 与 PlayerSettingsStore.KEY_SHOW_ONLINE_WATCHING 同键（存储值"开/关"），默认开。
         private const val KEY_SHOW_ONLINE_WATCHING = "show_online_watching"
+        // 与 PlayerSettingsStore.KEY_SHOW_LIVE_SUPER_CHAT 同键（存储值"开/关"），默认开。
+        private const val KEY_SHOW_LIVE_SUPER_CHAT = "show_live_super_chat"
         private const val KEY_SUBTITLE_DEFAULT_MODE = "subtitle_default_mode"
         private const val KEY_SUBTITLE_TEXT_SIZE = "subtitle_text_size"
         private const val KEY_SHOW_VIDEO_DETAIL = "show_video_detail"
@@ -317,6 +319,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
             SettingGroup(R.string.setting_group_controls, listOf(
                 stored(KEY_SHOW_BOTTOM_PROGRESS_BAR, R.string.show_bottom_progress_bar, "关"),
                 stored(KEY_SHOW_ONLINE_WATCHING, R.string.show_online_watching, "开"),
+                stored(KEY_SHOW_LIVE_SUPER_CHAT, R.string.show_live_super_chat, "开"),
                 stored(KEY_SHOW_NEXT_PREVIOUS, R.string.show_next_previous, "关"),
                 stored(KEY_SHOW_PLAY_SPEED_BUTTON, R.string.show_play_speed_button, "关"),
                 stored(KEY_SHOW_PLAYBACK_RATE, R.string.show_playback_rate, "关")
@@ -618,6 +621,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
             KEY_VIDEO_CODEC -> showPlayerChoiceDialog(key, arrayOf("AVC", "HEVC", "AV1"))
             KEY_SOFTWARE_VIDEO_DECODER -> toggle(key)
             KEY_SHOW_ONLINE_WATCHING -> toggle(key)
+            KEY_SHOW_LIVE_SUPER_CHAT -> toggle(key)
             // —— 播放·播放行为 ——
             KEY_RESUME_PLAYBACK -> toggle(key)
             KEY_AFTER_PLAY -> showPlayerChoiceDialog(key, arrayOf("什么都不做", "播推荐视频", "播列表中的下一个", "播放合集中的下一个"))
@@ -1375,6 +1379,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
         applyStored(KEY_SUBTITLE_TEXT_SIZE)
         applyStored(KEY_SHOW_BOTTOM_PROGRESS_BAR)
         applyStored(KEY_SHOW_ONLINE_WATCHING)
+        applyStored(KEY_SHOW_LIVE_SUPER_CHAT)
         applyStored(KEY_SHOW_NEXT_PREVIOUS)
         applyStored(KEY_SHOW_PLAY_SPEED_BUTTON)
         applyStored(KEY_SHOW_PLAYBACK_RATE)

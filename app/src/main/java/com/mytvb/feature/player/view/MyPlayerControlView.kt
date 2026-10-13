@@ -15,6 +15,7 @@ import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.TextView
 
+
 import androidx.annotation.OptIn
 import androidx.media3.common.C
 import androidx.media3.common.Player
@@ -89,6 +90,7 @@ class MyPlayerControlView @JvmOverloads constructor(
     private lateinit var buttonRewind: ImageView
     private lateinit var buttonFastForward: ImageView
     private lateinit var buttonDmSwitch: ImageView
+    private lateinit var buttonScSwitch: ImageView
     private lateinit var buttonMirror: ImageView
     private lateinit var buttonPlaySpeed: ImageView
     private lateinit var buttonSettings: ImageView
@@ -187,6 +189,7 @@ class MyPlayerControlView @JvmOverloads constructor(
         buttonRewind = findViewById(R.id.button_rewind)
         buttonFastForward = findViewById(R.id.button_fast_forward)
         buttonDmSwitch = findViewById(R.id.button_dm_switch)
+        buttonScSwitch = findViewById(R.id.button_sc_switch)
         buttonMirror = findViewById(R.id.button_mirror)
         buttonPlaySpeed = findViewById(R.id.button_play_speed)
         buttonSettings = findViewById(R.id.exo_settings)
@@ -245,6 +248,7 @@ class MyPlayerControlView @JvmOverloads constructor(
             buttonRewind,
             buttonFastForward,
             buttonDmSwitch,
+            buttonScSwitch,
             buttonMirror,
             buttonPlaySpeed,
             buttonSettings,
@@ -301,6 +305,15 @@ class MyPlayerControlView @JvmOverloads constructor(
             updateDmSwitchIcon()
             onDmEnableChangeImpl?.onDmEnable(dmEnabled)
             onVideoSettingChangeListener?.onDmEnableChange(dmEnabled)
+        }
+
+        buttonScSwitch.setOnClickListener {
+            resetHideCallbacks()
+            scEnabled = !scEnabled
+            updateScSwitchIcon()
+            val label = if (scEnabled) context.getString(R.string.on) else context.getString(R.string.off)
+            AppToast.show(context, "${context.getString(R.string.sc_switch)}：$label")
+            onVideoSettingChangeListener?.onSuperChatSwitch(scEnabled)
         }
 
         buttonMirror.setOnClickListener {
@@ -575,6 +588,23 @@ class MyPlayerControlView @JvmOverloads constructor(
 
     fun showHideDmSwitchButton(show: Boolean) {
         setButtonVisibility(buttonDmSwitch, show)
+    }
+
+    // ---- 直播 SC（醒目留言）开关 ----
+
+    private var scEnabled: Boolean = true
+
+    fun scSwitchButtonChange(enabled: Boolean) {
+        scEnabled = enabled
+        updateScSwitchIcon()
+    }
+
+    private fun updateScSwitchIcon() {
+        buttonScSwitch.setImageResource(if (scEnabled) R.drawable.ic_sc_enable else R.drawable.ic_sc_disable)
+    }
+
+    fun showHideScSwitchButton(show: Boolean) {
+        setButtonVisibility(buttonScSwitch, show)
     }
 
     private fun updateMirrorIcon() {
@@ -985,6 +1015,7 @@ class MyPlayerControlView @JvmOverloads constructor(
             buttonRewind,
             buttonFastForward,
             buttonDmSwitch,
+            buttonScSwitch,
             buttonMirror,
             buttonPlaySpeed,
             buttonSettings,

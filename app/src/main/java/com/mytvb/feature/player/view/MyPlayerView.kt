@@ -59,6 +59,7 @@ import com.mytvb.feature.player.LiveQualityInfo
 import com.mytvb.feature.player.PlaybackStartupTrace
 import com.mytvb.feature.player.danmaku.BlblDanmakuController
 import com.mytvb.feature.player.danmaku.DanmakuView
+import com.mytvb.feature.player.danmaku.LiveSuperChatSignal
 import com.mytvb.feature.player.danmaku.common.DanmakuSettingsSnapshot
 import com.mytvb.feature.player.danmaku.common.DanmakuController
 import com.mytvb.feature.player.danmaku.common.LiveDanmakuController
@@ -177,6 +178,8 @@ class MyPlayerView @JvmOverloads constructor(
     private var pendingSimpleKeyPressEnabled: Boolean? = null
     private var pendingEpisodeNavigationEnabled: Pair<Boolean, Boolean>? = null
     private var pendingDmSwitchVisible: Boolean? = null
+    private var pendingScSwitchVisible: Boolean? = null
+    private var pendingScSwitchEnabled: Boolean? = null
     private var pendingMirrorVisible: Boolean? = null
     private var pendingPlaySpeedButtonVisible: Boolean? = null
     private var pendingNextPreviousVisible: Boolean? = null
@@ -722,6 +725,8 @@ class MyPlayerView @JvmOverloads constructor(
         pendingSimpleKeyPressEnabled?.let(target::setSimpleKeyPressEnabled)
         pendingEpisodeNavigationEnabled?.let { target.setEpisodeNavigationEnabled(it.first, it.second) }
         pendingDmSwitchVisible?.let(target::showHideDmSwitchButton)
+        pendingScSwitchVisible?.let(target::showHideScSwitchButton)
+        pendingScSwitchEnabled?.let(target::scSwitchButtonChange)
         pendingMirrorVisible?.let(target::showHideMirrorButton)
         pendingPlaySpeedButtonVisible?.let(target::showHidePlaySpeedButton)
         pendingNextPreviousVisible?.let(target::showHideNextPrevious)
@@ -2598,6 +2603,16 @@ class MyPlayerView @JvmOverloads constructor(
         controller?.showHideDmSwitchButton(show)
     }
 
+    fun showHideScSwitchButton(show: Boolean) {
+        pendingScSwitchVisible = show
+        controller?.showHideScSwitchButton(show)
+    }
+
+    fun scSwitchButtonChange(enabled: Boolean) {
+        pendingScSwitchEnabled = enabled
+        controller?.scSwitchButtonChange(enabled)
+    }
+
     fun showHidePlaySpeedButton(show: Boolean) {
         pendingPlaySpeedButtonVisible = show
         controller?.showHidePlaySpeedButton(show)
@@ -2694,6 +2709,7 @@ class MyPlayerView @JvmOverloads constructor(
     private fun restoreOverlayZOrder() {
         val controllerLayer: View? = controller ?: findViewById<View>(R.id.exo_controller_placeholder)
         dmkMaskHost?.bringToFront()
+        findViewById<View>(R.id.super_chat_host)?.bringToFront()
         findViewById<View>(R.id.interaction_view)?.bringToFront()
         pauseIndicatorView?.bringToFront()
         douyinPreviewLayer?.bringToFront()
@@ -2703,6 +2719,8 @@ class MyPlayerView @JvmOverloads constructor(
         settingView?.bringToFront()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             dmkMaskHost?.translationZ = 1f
+            // SC 卡片在弹幕层之上、其余浮层之下
+            findViewById<View>(R.id.super_chat_host)?.translationZ = 1.5f
             findViewById<View>(R.id.interaction_view)?.translationZ = 2f
             pauseIndicatorView?.translationZ = 3f
             douyinPreviewLayer?.translationZ = 4f
@@ -3272,6 +3290,37 @@ class MyPlayerView @JvmOverloads constructor(
 
     fun addLiveDanmaku(dm: DmModel) {
         activeLiveDanmakuController()?.addLiveDanmaku(dm)
+    }
+
+    // ---- 直播 SC（醒目留言）卡片 ----
+
+    private fun superChatHost(): LiveSuperChatHostView? = findViewById(R.id.super_chat_host)
+
+    /** SC 开关：关＝隐藏并清空队列（SC 与弹幕开关联动由调用方决定，此处只管可见性）。 */
+    fun setLiveSuperChatEnabled(enabled: Boolean) {
+        val host = superChatHost() ?: return
+        scSwitchButtonChange(enabled)
+        if (enabled) {
+            if (host.visibility != View.VISIBLE) {
+                host.visibility = View.VISIBLE
+                restoreOverlayZOrder()
+            }
+        } else {
+            host.visibility = View.GONE
+            host.clear()
+        }
+    }
+
+    fun showLiveSuperChat(signal: LiveSuperChatSignal.New) {
+        superChatHost()?.show(signal)
+    }
+
+    fun removeLiveSuperChat(id: Long) {
+        superChatHost()?.remove(id)
+    }
+
+    fun clearLiveSuperChat() {
+        superChatHost()?.clear()
     }
 
     fun setDanmakuEnabled(enabled: Boolean) {

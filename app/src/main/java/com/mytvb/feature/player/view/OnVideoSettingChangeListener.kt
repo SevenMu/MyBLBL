@@ -17,6 +17,7 @@ interface OnVideoSettingChangeListener {
     fun onNext() {}
     fun onDmEnableChange(enabled: Boolean) {}
     fun onMirrorChange(enabled: Boolean) {}
+    fun onSuperChatSwitch(enabled: Boolean) {}
     fun onChooseEpisode() {}
     fun onMore() {}
     fun onVideoInfo() {}

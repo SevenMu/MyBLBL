@@ -62,6 +62,7 @@
     <dimen name="px127">127dip</dimen>
     <dimen name="px130">130dip</dimen>
     <dimen name="px135">135dip</dimen>
+    <dimen name="px140">140dip</dimen>
     <dimen name="px147">147dip</dimen>
     <dimen name="px150">150dip</dimen>
     <dimen name="px169">169dip</dimen>
@@ -90,6 +91,7 @@
     <dimen name="px620">620dip</dimen>
     <dimen name="px650">650dip</dimen>
     <dimen name="px675">675dip</dimen>
+    <dimen name="px700">700dip</dimen>
     <dimen name="px740">740dip</dimen>
     <dimen name="px800">800dip</dimen>
     <dimen name="px900">900dip</dimen>

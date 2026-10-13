@@ -31,6 +31,9 @@ class LiveDanmakuManager(
     private val _danmakuFlow = MutableSharedFlow<DmModel>(extraBufferCapacity = 128)
     val danmakuFlow: SharedFlow<DmModel> = _danmakuFlow.asSharedFlow()
 
+    private val _superChatFlow = MutableSharedFlow<LiveSuperChatSignal>(extraBufferCapacity = 16)
+    val superChatFlow: SharedFlow<LiveSuperChatSignal> = _superChatFlow.asSharedFlow()
+
     private val _isConnected = MutableStateFlow(false)
     val isConnected: StateFlow<Boolean> = _isConnected.asStateFlow()
 
@@ -99,6 +102,13 @@ class LiveDanmakuManager(
             }
         }
 
+        // SC 是付费内容，不进弹幕过滤，全量转发
+        val superChatJob = scope.launch {
+            client.superChatSignals.collect { signal ->
+                _superChatFlow.tryEmit(signal)
+            }
+        }
+
         // 监听连接状态，断开时取消 messageJob 让 connectOnce 结束
         val stateJob = scope.launch {
             client.connectionState.collect { state ->
@@ -118,6 +128,7 @@ class LiveDanmakuManager(
         } finally {
             client.release()
             stateJob.cancel()
+            superChatJob.cancel()
         }
     }
 
