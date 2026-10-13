@@ -387,8 +387,7 @@
                 android:layout_width="@dimen/px30"
                 android:layout_height="@dimen/px30"
                 android:layout_gravity="center"
-                app:srcCompat="@drawable/ic_block_video"
-                app:tint="@color/textColor" />
+                app:srcCompat="@drawable/ic_block_video" />
         </FrameLayout>
 
         <androidx.appcompat.widget.LinearLayoutCompat
@@ -446,8 +445,7 @@
                 android:layout_width="@dimen/px30"
                 android:layout_height="@dimen/px30"
                 android:layout_gravity="center"
-                app:srcCompat="@drawable/ic_block_up"
-                app:tint="@color/textColor" />
+                app:srcCompat="@drawable/ic_block_up" />
         </FrameLayout>
 
         <androidx.appcompat.widget.LinearLayoutCompat
