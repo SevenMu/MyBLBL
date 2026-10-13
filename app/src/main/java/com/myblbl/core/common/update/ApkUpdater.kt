@@ -31,8 +31,8 @@ import kotlin.time.Duration.Companion.milliseconds
 
 object ApkUpdater {
 
-    private const val GITHUB_OWNER = "qianxuntudou-ops"
-    private const val GITHUB_REPO = "MyBili"
+    private const val GITHUB_OWNER = "SevenMu"
+    private const val GITHUB_REPO = "MyBLBL"
     private const val RELEASE_API_URL =
         "https://api.github.com/repos/$GITHUB_OWNER/$GITHUB_REPO/releases/latest"
 
