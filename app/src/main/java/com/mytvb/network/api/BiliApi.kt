@@ -252,6 +252,36 @@ object BiliApi {
     }
 
     /**
+     * 关注主播的正在直播全量列表（xlive/app-interface/v1/relation/liveAnchor，需登录）。
+     *
+     * 官方「我的关注」H5（live-app-my-focus）同款接口。首页 index/getList 的关注模块
+     * 服务端只下发约 6 条，此接口按页返回全量：data.total_count=正在直播的关注总数，
+     * data.rooms=直播间列表（字段与首页模块相近，room_id/roomid 两种命名都兼容，
+     * 见 LiveRoomItem.fromJson）。
+     *
+     * @return total_count 到当前页条目的 Pair，接口异常时抛错由调用方降级。
+     */
+    suspend fun attentionLiveList(page: Int, pageSize: Int = 30): Pair<Int, List<com.mytvb.model.live.LiveRoomItem>> {
+        val url = BiliClient.buildUrl(
+            path = "https://api.live.bilibili.com/xlive/app-interface/v1/relation/liveAnchor",
+            params = mapOf(
+                "page" to page.coerceAtLeast(1).toString(),
+                "pagesize" to pageSize.coerceIn(1, 30).toString()
+            )
+        )
+        val json = BiliClient.getJson(url)
+        BiliClient.checkResponse(json, "attentionLiveList")
+        val data = json.optJSONObject("data") ?: JSONObject()
+        val totalCount = data.optInt("total_count", 0)
+        val rooms = data.optJSONArray("rooms")?.let { arr ->
+            (0 until arr.length()).mapNotNull { idx ->
+                runCatching { com.mytvb.model.live.LiveRoomItem.fromJson(arr.getJSONObject(idx)) }.getOrNull()
+            }
+        } ?: emptyList()
+        return totalCount to rooms
+    }
+
+    /**
      * 查询当前登录用户对目标用户的关注关系（x/relation，需登录 cookie）。
      *
      * 返回 attribute：0=未关注、1=悄悄关注、2=已关注、6=互相关注；
