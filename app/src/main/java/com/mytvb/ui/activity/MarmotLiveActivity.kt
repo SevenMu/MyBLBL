@@ -18,7 +18,7 @@ import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.widget.ArrayAdapter
-import android.widget.Toast
+
 import androidx.activity.OnBackPressedCallback
 import androidx.recyclerview.widget.LinearLayoutManager
 import com.google.gson.Gson
@@ -40,6 +40,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.mytvb.core.ui.base.AppToast
 
 /**
  * TV 直播主界面（对标参考 utao `LiveActivity.java`，基于系统 WebView）。
@@ -97,7 +98,7 @@ class MarmotLiveActivity : BaseActivity<ActivityMarmotLiveBinding>() {
             com.mytvb.core.common.content.TeenModeTimer.tick()
             if (com.mytvb.core.common.content.TeenModeTimer.isResting()) {
                 val restMin = com.mytvb.core.common.content.TeenModeTimer.getRestLimitMin().coerceAtLeast(1)
-                android.widget.Toast.makeText(this@MarmotLiveActivity, getString(R.string.activity_teen_rest_needed_format, restMin), android.widget.Toast.LENGTH_SHORT).show()
+                AppToast.show(this@MarmotLiveActivity, getString(R.string.activity_teen_rest_needed_format, restMin))
                 finish()
                 return
             }
@@ -281,7 +282,7 @@ class MarmotLiveActivity : BaseActivity<ActivityMarmotLiveBinding>() {
             AppLog.i(TAG, "initData: 频道表加载结果=$loaded")
             if (!loaded) {
                 AppLog.e(TAG, "initData: 频道数据加载失败，请检查网络/明文流量权限/filesDir 是否损坏")
-                Toast.makeText(this@MarmotLiveActivity, R.string.activity_channel_load_failed, Toast.LENGTH_SHORT).show()
+                AppToast.show(this@MarmotLiveActivity, R.string.activity_channel_load_failed)
                 return@launch
             }
             provinces.clear()
@@ -310,7 +311,7 @@ class MarmotLiveActivity : BaseActivity<ActivityMarmotLiveBinding>() {
             AppLog.i(TAG, "initData: CCTV 频道过滤后 ${provinces.size} 个分组，" +
                 "${provinces.sumOf { it.vods.size }} 个频道")
             if (provinces.isEmpty()) {
-                Toast.makeText(this@MarmotLiveActivity, R.string.activity_no_cctv_channels, Toast.LENGTH_SHORT).show()
+                AppToast.show(this@MarmotLiveActivity, R.string.activity_no_cctv_channels)
                 return@launch
             }
             // 3. 恢复上次观看频道：优先按保存的 URL 反查（必须是 CCTV 频道），否则回退首个 CCTV 频道
@@ -322,11 +323,11 @@ class MarmotLiveActivity : BaseActivity<ActivityMarmotLiveBinding>() {
                 provinces.first().vods.first()
             }
             if (currentVod == null) {
-                Toast.makeText(this@MarmotLiveActivity, R.string.activity_no_channels, Toast.LENGTH_SHORT).show()
+                AppToast.show(this@MarmotLiveActivity, R.string.activity_no_channels)
                 return@launch
             }
             playCurrent()
-            Toast.makeText(this@MarmotLiveActivity, R.string.activity_remote_switch_channel_tip, Toast.LENGTH_SHORT).show()
+            AppToast.show(this@MarmotLiveActivity, R.string.activity_remote_switch_channel_tip)
         }
     }
 
@@ -588,7 +589,7 @@ $scriptTags
     /** 显示频道列表浮层（双排）。 */
     private fun showChannelMenu() {
         if (provinces.isEmpty()) {
-            Toast.makeText(this, R.string.activity_channel_loading, Toast.LENGTH_SHORT).show()
+            AppToast.show(this, R.string.activity_channel_loading)
             return
         }
         isChannelMenuShowing = true
@@ -644,7 +645,7 @@ $scriptTags
         val items = provider.availableQualities()
         AppLog.i(TAG, "showQualityMenu: provider=${provider.javaClass.simpleName} 画质 ${items.size} 项")
         if (items.isEmpty()) {
-            Toast.makeText(this, R.string.activity_no_quality_options, Toast.LENGTH_SHORT).show()
+            AppToast.show(this, R.string.activity_no_quality_options)
             return
         }
         val currentIdx = provider.currentQualityIndex(items)
@@ -897,7 +898,7 @@ $scriptTags
                     finish()
                 } else {
                     exitTime = System.currentTimeMillis()
-                    Toast.makeText(this, R.string.activity_exit_live_hint, Toast.LENGTH_SHORT).show()
+                    AppToast.show(this, R.string.activity_exit_live_hint)
                 }
             }
         }

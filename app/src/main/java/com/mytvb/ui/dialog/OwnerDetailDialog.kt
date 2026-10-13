@@ -8,7 +8,7 @@ import androidx.core.content.ContextCompat
 import android.view.LayoutInflater
 import android.view.Window
 import com.mytvb.core.ui.base.DialogWindowFit
-import android.widget.Toast
+
 import androidx.appcompat.app.AppCompatDialog
 import androidx.core.view.isVisible
 import androidx.fragment.app.FragmentActivity
@@ -45,6 +45,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
+import com.mytvb.core.ui.base.AppToast
 
 class OwnerDetailDialog(
     context: Context,
@@ -799,7 +800,7 @@ class OwnerDetailDialog(
     private fun checkLogin(): Boolean = sessionGateway.isLoggedIn()
 
     private fun toast(message: String) {
-        Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+        AppToast.show(context, message)
     }
 
     /**

@@ -3,7 +3,7 @@ package com.mytvb.feature.settings
 import android.graphics.Bitmap
 import android.view.LayoutInflater
 import android.view.ViewGroup
-import android.widget.Toast
+
 import androidx.lifecycle.lifecycleScope
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
@@ -23,6 +23,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.koin.android.ext.android.inject
+import com.mytvb.core.ui.base.AppToast
 
 class SignInFragment : BaseFragment<FragmentSignInBinding>() {
 
@@ -62,19 +63,11 @@ class SignInFragment : BaseFragment<FragmentSignInBinding>() {
                     displayQrCode(qrUrl)
                     startPolling()
                 } else {
-                    Toast.makeText(
-                        requireContext(),
-                        getString(R.string.sign_in_qr_failed_format, response.message.orEmpty()),
-                        Toast.LENGTH_SHORT
-                    ).show()
+                    AppToast.show(requireContext(), getString(R.string.sign_in_qr_failed_format, response.message.orEmpty()))
                 }
             } catch (e: Exception) {
                 binding.progressBar.visibility = android.view.View.GONE
-                Toast.makeText(
-                    requireContext(),
-                    getString(R.string.sign_in_qr_failed_format, e.message.orEmpty()),
-                    Toast.LENGTH_SHORT
-                ).show()
+                AppToast.show(requireContext(), getString(R.string.sign_in_qr_failed_format, e.message.orEmpty()))
             }
         }
     }
@@ -87,7 +80,7 @@ class SignInFragment : BaseFragment<FragmentSignInBinding>() {
             }
         } catch (e: Exception) {
             AppLog.e("SignInFragment", "displayQrCode failed", e)
-            Toast.makeText(requireContext(), "生成二维码失败", Toast.LENGTH_SHORT).show()
+            AppToast.show(requireContext(), "生成二维码失败")
         }
     }
 
@@ -161,7 +154,7 @@ class SignInFragment : BaseFragment<FragmentSignInBinding>() {
                     }
                     // TV 登录不产生 web refresh_token，清空防止后续刷新用无效 token
                     NetworkManager.clearWebRefreshToken()
-                    Toast.makeText(requireContext(), "登录成功", Toast.LENGTH_SHORT).show()
+                    AppToast.show(requireContext(), "登录成功")
                     onLoginSuccess()
                 }
                 response.code == 86038 -> {

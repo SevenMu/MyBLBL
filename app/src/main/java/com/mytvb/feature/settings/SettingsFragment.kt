@@ -17,6 +17,7 @@ import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
+import com.mytvb.core.ui.base.AppToast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatDialog
 import androidx.appcompat.app.AppCompatDelegate
@@ -499,11 +500,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
         val newValue = if (setting.value == "开") "关" else "开"
         updateStored(key, newValue)
         persist(newValue)
-        Toast.makeText(
-            requireContext(),
-            getString(R.string.toast_setting_value_format, setting.title, labelOf(newValue)),
-            Toast.LENGTH_SHORT
-        ).show()
+        AppToast.show(requireContext(), getString(R.string.toast_setting_value_format, setting.title, labelOf(newValue)))
     }
 
     private fun setupRecyclerView() {
@@ -674,11 +671,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
                 val newValue = if (AppLog.isEnabled) "关" else "开"
                 AppLog.setEnabled(newValue == "开")
                 updateInfo(key, labelOf(newValue))
-                Toast.makeText(
-                    requireContext(),
-                    getString(R.string.log_enabled_toast, labelOf(newValue)),
-                    Toast.LENGTH_SHORT
-                ).show()
+                AppToast.show(requireContext(), getString(R.string.log_enabled_toast, labelOf(newValue)))
             }
             KEY_DEBUG_LOG -> {
                 val activity = activity as? MainActivity
@@ -699,12 +692,12 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
 
         // 已加载或已安装 → 无需重复操作
         if (x5.isX5Loaded(activity) || x5.isInstalled(activity)) {
-            Toast.makeText(activity, getString(R.string.x5_installed_toast), Toast.LENGTH_SHORT).show()
+            AppToast.show(activity, getString(R.string.x5_installed_toast))
             return
         }
         // 正在处理 → 提示等待
         if (x5.isBusy()) {
-            Toast.makeText(activity, getString(R.string.processing_toast), Toast.LENGTH_SHORT).show()
+            AppToast.show(activity, getString(R.string.processing_toast))
             return
         }
 
@@ -797,7 +790,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
             override fun onComplete(success: Boolean, message: String) {
                 if (!isAdded) return
                 dialog.dismiss()
-                Toast.makeText(activity, message, Toast.LENGTH_SHORT).show()
+                AppToast.show(activity, message)
                 updateX5StatusItem(
                     if (success) getString(R.string.x5_status_installed_restart)
                     else getString(R.string.x5_status_install_failed)
@@ -849,11 +842,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
             refreshItem(KEY_PSAS_INTERVAL)
             appSettings.putStringAsync(KEY_PSAS_INTERVAL, rawValue)
             com.mytvb.core.common.content.TeenModeTimer.resetForLimitChange()
-            Toast.makeText(
-                requireContext(),
-                getString(R.string.toast_setting_value_format, item.title, selected),
-                Toast.LENGTH_SHORT
-            ).show()
+            AppToast.show(requireContext(), getString(R.string.toast_setting_value_format, item.title, selected))
         }
     }
 
@@ -874,11 +863,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
             appSettings.putStringAsync(key, rawValue)
             // 改时长设置：清掉累计观看时长与休息戳，避免脏状态
             com.mytvb.core.common.content.TeenModeTimer.resetForLimitChange()
-            Toast.makeText(
-                requireContext(),
-                getString(R.string.toast_setting_value_format, item.title, selected),
-                Toast.LENGTH_SHORT
-            ).show()
+            AppToast.show(requireContext(), getString(R.string.toast_setting_value_format, item.title, selected))
         }
     }
 
@@ -914,7 +899,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
     private fun checkForUpdate() {
         val cooldown = ApkUpdater.cooldownLeftMs()
         if (cooldown > 0) {
-            Toast.makeText(requireContext(), getString(R.string.toast_try_later), Toast.LENGTH_SHORT).show()
+            AppToast.show(requireContext(), getString(R.string.toast_try_later))
             return
         }
         ApkUpdater.markStarted()
@@ -938,11 +923,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
                 val msg = e.message ?: getString(R.string.unknown_error)
                 updateCheckState.value = UpdateCheckState.Error(msg)
                 updateUpdateEntry()
-                Toast.makeText(
-                    requireContext(),
-                    getString(R.string.update_check_failed_format, msg),
-                    Toast.LENGTH_LONG
-                ).show()
+                AppToast.show(requireContext(), getString(R.string.update_check_failed_format, msg), Toast.LENGTH_LONG)
             }
         }
     }
@@ -1217,7 +1198,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
                     is java.io.IOException -> getString(R.string.net_error_toast)
                     else -> getString(R.string.download_failed_toast)
                 }
-                Toast.makeText(requireContext(), hint, Toast.LENGTH_LONG).show()
+                AppToast.show(requireContext(), hint, Toast.LENGTH_LONG)
                 updateCheckState.value = UpdateCheckState.Idle
                 updateUpdateEntry()
             }
@@ -1247,7 +1228,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
             context.externalCacheDir?.let { deleteDir(it) }
             itemOf(KEY_CLEAR_CACHE)?.info = NumberUtils.formatBytes(getCurrentCacheSize())
             refreshItem(KEY_CLEAR_CACHE)
-            Toast.makeText(requireContext(), getString(R.string.toast_cache_cleared), Toast.LENGTH_SHORT).show()
+            AppToast.show(requireContext(), getString(R.string.toast_cache_cleared))
         } catch (e: Exception) {
             AppLog.e("SettingsFragment", "clearCache failed", e)
         }
@@ -1832,24 +1813,24 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
         val title = getString(R.string.sponsor_block)
 
         if (newValue == "关") {
-            Toast.makeText(requireContext(), getString(R.string.toast_setting_value_format, title, labelOf(newValue)), Toast.LENGTH_SHORT).show()
+            AppToast.show(requireContext(), getString(R.string.toast_setting_value_format, title, labelOf(newValue)))
             return
         }
 
-        Toast.makeText(requireContext(), "${getString(R.string.toast_setting_value_format, title, labelOf(newValue))}，${getString(R.string.sponsor_testing)}", Toast.LENGTH_SHORT).show()
+        AppToast.show(requireContext(), "${getString(R.string.toast_setting_value_format, title, labelOf(newValue))}，${getString(R.string.sponsor_testing)}")
         updateScope.launch {
             val connError = SponsorBlockRepository.testConnection(requireContext())
             withContext(Dispatchers.Main) {
                 if (!isAdded) return@withContext
                 if (connError != null) {
-                    Toast.makeText(requireContext(), connError, Toast.LENGTH_LONG).show()
+                    AppToast.show(requireContext(), connError, Toast.LENGTH_LONG)
                     return@withContext
                 }
             }
             val fetchResult = SponsorBlockRepository.testFetch(requireContext())
             withContext(Dispatchers.Main) {
                 if (!isAdded) return@withContext
-                Toast.makeText(requireContext(), fetchResult, Toast.LENGTH_LONG).show()
+                AppToast.show(requireContext(), fetchResult, Toast.LENGTH_LONG)
             }
         }
     }
@@ -1880,7 +1861,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
         appSettings.putStringAsync(KEY_GAIA_VGATE_V_VOUCHER, null)
         appSettings.putStringAsync(KEY_GAIA_VGATE_V_VOUCHER_SAVED_AT_MS, null)
         updateRiskControlStatus()
-        Toast.makeText(requireContext(), getString(R.string.verify_success), Toast.LENGTH_SHORT).show()
+        AppToast.show(requireContext(), getString(R.string.verify_success))
     }
 
     private fun showRiskControlDialog() {
@@ -2086,7 +2067,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
             appSettings.putStringAsync(KEY_GAIA_VGATE_V_VOUCHER, null)
             appSettings.putStringAsync(KEY_GAIA_VGATE_V_VOUCHER_SAVED_AT_MS, null)
             updateRiskControlStatus()
-            Toast.makeText(requireContext(), getString(R.string.voucher_cleared), Toast.LENGTH_SHORT).show()
+            AppToast.show(requireContext(), getString(R.string.voucher_cleared))
         }
 
         fun saveVoucher() {
@@ -2095,7 +2076,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
                 appSettings.putStringAsync(KEY_GAIA_VGATE_V_VOUCHER, v)
                 appSettings.putStringAsync(KEY_GAIA_VGATE_V_VOUCHER_SAVED_AT_MS, System.currentTimeMillis().toString())
                 updateRiskControlStatus()
-                Toast.makeText(requireContext(), getString(R.string.voucher_saved_toast), Toast.LENGTH_SHORT).show()
+                AppToast.show(requireContext(), getString(R.string.voucher_saved_toast))
             } else {
                 clearVoucher()
             }
@@ -2223,7 +2204,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
                                 } else {
                                     inputSequence.clear()
                                     codeDisplayView.text = "? ? ? ? ? ? ? ?"
-                                    Toast.makeText(requireContext(), getString(R.string.konami_wrong), Toast.LENGTH_SHORT).show()
+                                    AppToast.show(requireContext(), getString(R.string.konami_wrong))
                                 }
                             }
                             true

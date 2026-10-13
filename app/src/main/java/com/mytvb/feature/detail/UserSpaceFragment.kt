@@ -4,7 +4,7 @@ import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Toast
+
 import androidx.core.os.bundleOf
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
@@ -41,6 +41,7 @@ import com.mytvb.core.common.log.AppLog
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import org.koin.android.ext.android.inject
+import com.mytvb.core.ui.base.AppToast
 
 class UserSpaceFragment : BaseFragment<FragmentUserSpaceBinding>(), com.mytvb.ui.activity.MainActivity.OnVideoBlockedListener {
 
@@ -250,15 +251,11 @@ class UserSpaceFragment : BaseFragment<FragmentUserSpaceBinding>(), com.mytvb.ui
                         }
                     }
                 } else if (response.code != -101) {
-                    Toast.makeText(requireContext(), response.errorMessage, Toast.LENGTH_SHORT).show()
+                    AppToast.show(requireContext(), response.errorMessage)
                 }
             } catch (e: Exception) {
                 binding.progressBar.visibility = View.GONE
-                Toast.makeText(
-                    requireContext(),
-                    getString(R.string.load_failed_format, e.message),
-                    Toast.LENGTH_SHORT
-                ).show()
+                AppToast.show(requireContext(), getString(R.string.load_failed_format, e.message))
             }
         }
     }
@@ -303,18 +300,14 @@ class UserSpaceFragment : BaseFragment<FragmentUserSpaceBinding>(), com.mytvb.ui
                     }
                 } else {
                     rollbackPage()
-                    Toast.makeText(requireContext(), response.message, Toast.LENGTH_SHORT).show()
+                    AppToast.show(requireContext(), response.message)
                 }
             }.onFailure { e ->
                 binding.progressBar.visibility = View.GONE
                 swipeRefreshLayout?.isRefreshing = false
                 isLoading = false
                 rollbackPage()
-                Toast.makeText(
-                    requireContext(),
-                    getString(R.string.load_failed_format, e.message),
-                    Toast.LENGTH_SHORT
-                ).show()
+                AppToast.show(requireContext(), getString(R.string.load_failed_format, e.message))
             }
         }
     }
@@ -436,21 +429,13 @@ class UserSpaceFragment : BaseFragment<FragmentUserSpaceBinding>(), com.mytvb.ui
                     renderFollowButton()
                     loadRelationState()
                     loadUserStat()
-                    Toast.makeText(
-                        requireContext(),
-                        if (action == 1) getString(R.string.toast_follow_success)
-                        else getString(R.string.toast_cancel_follow_success),
-                        Toast.LENGTH_SHORT
-                    ).show()
+                    AppToast.show(requireContext(),if (action == 1) getString(R.string.toast_follow_success)
+                        else getString(R.string.toast_cancel_follow_success))
                 } else {
-                    Toast.makeText(requireContext(), response.message, Toast.LENGTH_SHORT).show()
+                    AppToast.show(requireContext(), response.message)
                 }
             }.onFailure { e ->
-                Toast.makeText(
-                    requireContext(),
-                    getString(R.string.toast_operation_failed_format, e.message),
-                    Toast.LENGTH_SHORT
-                ).show()
+                AppToast.show(requireContext(), getString(R.string.toast_operation_failed_format, e.message))
             }
         }
     }

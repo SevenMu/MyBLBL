@@ -10,7 +10,7 @@ import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
 import android.widget.FrameLayout
-import android.widget.Toast
+
 import android.widget.ImageView
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -24,6 +24,7 @@ import com.mytvb.model.subtitle.SubtitleInfoModel
 import com.mytvb.model.video.quality.AudioQuality
 import com.mytvb.model.video.quality.VideoCodecEnum
 import com.mytvb.model.video.quality.VideoQuality
+import com.mytvb.core.ui.base.AppToast
 
 class MyPlayerSettingView @JvmOverloads constructor(
     context: Context,
@@ -553,11 +554,7 @@ class MyPlayerSettingView @JvmOverloads constructor(
                 updateState { it.copy(softwareDecoderEnabled = newValue) }
                 onPlayerSettingChange?.onSoftwareDecoderChange(newValue)
                 val label = if (newValue) context.getString(R.string.on) else context.getString(R.string.off)
-                Toast.makeText(
-                    context,
-                    "${context.getString(R.string.software_video_decoder)}：$label",
-                    Toast.LENGTH_SHORT
-                ).show()
+                AppToast.show(context,"${context.getString(R.string.software_video_decoder)}：$label")
                 refreshCurrentMenuInPlace()
             }
             ITEM_AUDIO_QUALITY -> showAudioQualityMenu()
@@ -571,7 +568,7 @@ class MyPlayerSettingView @JvmOverloads constructor(
                 }
                 onPlayerSettingChange?.onScreenMirrorChange(newValue)
                 val label = if (newValue) context.getString(R.string.on) else context.getString(R.string.off)
-                Toast.makeText(context, "${context.getString(R.string.screen_mirror)}：$label", Toast.LENGTH_SHORT).show()
+                AppToast.show(context, "${context.getString(R.string.screen_mirror)}：$label")
                 refreshCurrentMenuInPlace()
             }
         }
@@ -742,7 +739,7 @@ class MyPlayerSettingView @JvmOverloads constructor(
             else -> return false
         }
         val label = if (newValue) context.getString(R.string.on) else context.getString(R.string.off)
-        Toast.makeText(context, "$title：$label", Toast.LENGTH_SHORT).show()
+        AppToast.show(context, "$title：$label")
         refreshCurrentMenuInPlace()
         return true
     }

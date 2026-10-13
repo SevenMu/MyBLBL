@@ -14,7 +14,6 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.ProgressBar
 import android.widget.TextView
-import android.widget.Toast
 
 import androidx.annotation.OptIn
 import androidx.media3.common.C
@@ -27,6 +26,7 @@ import com.mytvb.core.common.log.AppLog
 import com.mytvb.feature.player.sponsor.SponsorSegment
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.LazyThreadSafetyMode
+import com.mytvb.core.ui.base.AppToast
 
 @OptIn(UnstableApi::class)
 class MyPlayerControlView @JvmOverloads constructor(
@@ -308,7 +308,7 @@ class MyPlayerControlView @JvmOverloads constructor(
             mirrorEnabled = !mirrorEnabled
             updateMirrorIcon()
             val label = if (mirrorEnabled) context.getString(R.string.on) else context.getString(R.string.off)
-            Toast.makeText(context, "${context.getString(R.string.screen_mirror)}：$label", Toast.LENGTH_SHORT).show()
+            AppToast.show(context, "${context.getString(R.string.screen_mirror)}：$label")
             onVideoSettingChangeListener?.onMirrorChange(mirrorEnabled)
         }
 

@@ -20,6 +20,7 @@ import android.widget.FrameLayout
 import com.mytvb.feature.player.sponsor.SponsorProgressMarkerView
 import android.widget.TextView
 import android.widget.Toast
+import com.mytvb.core.ui.base.AppToast
 import com.mytvb.core.common.ext.toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
@@ -533,11 +534,7 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
                     // 试看流播完：提示后停在控制器，不自动连播（连播只会得到下一集的又一段试看）
                     if (viewModel.isPreviewPlayback) {
                         AppLog.i(TAG, "preview playback ended, show controller instead of autoplay")
-                        Toast.makeText(
-                            applicationContext,
-                            R.string.activity_preview_ended_hint,
-                            Toast.LENGTH_LONG
-                        ).show()
+                        AppToast.show(applicationContext,R.string.activity_preview_ended_hint,Toast.LENGTH_LONG)
                         playerView.showController()
                         return
                     }
@@ -1089,7 +1086,7 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
                     Player.REPEAT_MODE_ONE
                 }
                 playerView.setRepeatMode(currentPlayer.repeatMode)
-                Toast.makeText(applicationContext, if (currentPlayer.repeatMode == Player.REPEAT_MODE_ONE) R.string.activity_repeat_one else R.string.activity_repeat_all, Toast.LENGTH_SHORT).show()
+                AppToast.show(applicationContext, if (currentPlayer.repeatMode == Player.REPEAT_MODE_ONE) R.string.activity_repeat_one else R.string.activity_repeat_all)
             }
             override fun onDmEnableChange(enabled: Boolean) { playerView.setDanmakuEnabled(enabled) }
             override fun onPlaybackSpeedClick() { playerView.showPlaybackSpeedSettingView() }
@@ -1126,7 +1123,7 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
                             finish()
                         } else {
                             exitTime = System.currentTimeMillis()
-                            Toast.makeText(applicationContext, R.string.activity_exit_player_hint, Toast.LENGTH_SHORT).show()
+                            AppToast.show(applicationContext, R.string.activity_exit_player_hint)
                         }
                     },
                 )
@@ -1300,7 +1297,7 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
             viewModel.riskControlTryLookBypass.collect { bypassed ->
                 if (!bypassed) return@collect
                 if (riskControlUserHintShown.compareAndSet(false, true)) {
-                    Toast.makeText(applicationContext, R.string.activity_risk_control_settings_hint, Toast.LENGTH_LONG).show()
+                    AppToast.show(applicationContext, R.string.activity_risk_control_settings_hint, Toast.LENGTH_LONG)
                 }
             }
         }
@@ -1978,11 +1975,7 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
         val cid = viewModel.previewContextCid
         if (cid == previewHintShownCid) return
         previewHintShownCid = cid
-        Toast.makeText(
-            applicationContext,
-            R.string.activity_preview_start_hint,
-            Toast.LENGTH_LONG
-        ).show()
+        AppToast.show(applicationContext,R.string.activity_preview_start_hint,Toast.LENGTH_LONG)
     }
 
     private fun hideContentPanel() {

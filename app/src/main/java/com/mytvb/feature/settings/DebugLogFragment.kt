@@ -5,6 +5,7 @@ import android.view.LayoutInflater
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.Toast
+import com.mytvb.core.ui.base.AppToast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.widget.AppCompatTextView
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -236,7 +237,7 @@ class DebugLogFragment : BaseFragment<FragmentDebugLogBinding>() {
                     .setPositiveButton(R.string.debug_got_it, null)
                     .show()
             }.onFailure { e ->
-                Toast.makeText(requireContext(), getString(R.string.debug_export_failed_format, e.message), Toast.LENGTH_LONG).show()
+                AppToast.show(requireContext(), getString(R.string.debug_export_failed_format, e.message), Toast.LENGTH_LONG)
             }
         }
     }

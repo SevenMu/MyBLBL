@@ -7,7 +7,7 @@ import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.View
 import android.view.Window
-import android.widget.Toast
+
 import androidx.appcompat.app.AppCompatDialog
 import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.RecyclerView
@@ -33,6 +33,7 @@ import kotlinx.coroutines.launch
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
 import com.mytvb.core.ui.base.DialogWindowFit
+import com.mytvb.core.ui.base.AppToast
 
 class VideoCardMenuDialog(
     context: Context,
@@ -718,7 +719,7 @@ class VideoCardMenuDialog(
     }
 
     private fun toast(message: String) {
-        Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+        AppToast.show(context, message)
     }
 
     override fun dismiss() {

@@ -5,7 +5,6 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Toast
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.Lifecycle
@@ -34,6 +33,7 @@ import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import org.koin.android.ext.android.inject
 import org.koin.androidx.viewmodel.ext.android.viewModel
+import com.mytvb.core.ui.base.AppToast
 
 @UnstableApi
 class LivePlayerFragment : Fragment() {
@@ -205,7 +205,7 @@ class LivePlayerFragment : Fragment() {
 
             override fun onRefresh() {
                 if (roomId > 0) {
-                    Toast.makeText(requireContext(), getString(R.string.live_toast_refreshing), Toast.LENGTH_SHORT).show()
+                    AppToast.show(requireContext(), getString(R.string.live_toast_refreshing))
                     viewModel.refreshLiveStream(roomId)
                 }
             }
@@ -337,7 +337,7 @@ class LivePlayerFragment : Fragment() {
 
         viewLifecycleOwner.lifecycleScope.launch {
             viewModel.refreshEvent.collect { msg ->
-                Toast.makeText(requireContext(), msg, Toast.LENGTH_SHORT).show()
+                AppToast.show(requireContext(), msg)
             }
         }
 

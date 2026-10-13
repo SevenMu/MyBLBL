@@ -10,7 +10,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.widget.TextView
-import android.widget.Toast
+
 import com.mytvb.core.ui.base.ChoiceDialog
 import androidx.core.os.bundleOf
 import androidx.core.view.isVisible
@@ -50,6 +50,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import org.koin.androidx.viewmodel.ext.android.viewModel
+import com.mytvb.core.ui.base.AppToast
 
 @OptIn(FlowPreview::class)
 class SearchNewFragment :
@@ -393,7 +394,7 @@ class SearchNewFragment :
     private fun performSearch(keyword: String) {
         val normalized = keyword.trim()
         if (normalized.isEmpty()) {
-            Toast.makeText(requireContext(), R.string.empty_keyword, Toast.LENGTH_SHORT).show()
+            AppToast.show(requireContext(), R.string.empty_keyword)
             return
         }
 

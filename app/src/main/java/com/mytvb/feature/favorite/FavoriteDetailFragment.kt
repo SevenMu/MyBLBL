@@ -4,7 +4,7 @@ import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.Toast
+
 import androidx.core.os.bundleOf
 import androidx.core.view.isVisible
 import androidx.lifecycle.Lifecycle
@@ -35,6 +35,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import org.koin.android.ext.android.inject
+import com.mytvb.core.ui.base.AppToast
 
 class FavoriteDetailFragment : BaseFragment<FragmentFavoriteDetailBinding>() {
 
@@ -404,7 +405,7 @@ class FavoriteDetailFragment : BaseFragment<FragmentFavoriteDetailBinding>() {
             return
         }
         showListContent()
-        Toast.makeText(requireContext(), message, Toast.LENGTH_SHORT).show()
+        AppToast.show(requireContext(), message)
     }
 
     private fun rollbackPage() {

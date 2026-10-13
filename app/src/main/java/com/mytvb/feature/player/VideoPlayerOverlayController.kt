@@ -10,7 +10,7 @@ import android.view.animation.Animation
 import android.view.animation.AnimationUtils
 import android.widget.LinearLayout
 import android.widget.TextView
-import android.widget.Toast
+
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatDialog
 import androidx.core.content.ContextCompat
@@ -36,6 +36,7 @@ import com.mytvb.core.ui.layout.WrapContentGridLayoutManager
 import com.mytvb.feature.player.comment.CommentPanelDialog
 import com.mytvb.feature.player.view.MyPlayerView
 import com.mytvb.core.ui.base.DialogWindowFit
+import com.mytvb.core.ui.base.AppToast
 
 @UnstableApi
 class VideoPlayerOverlayController(
@@ -65,7 +66,7 @@ class VideoPlayerOverlayController(
         val episodes = sessionCoordinator.getEpisodes()
         val selectedEpisodeIndex = sessionCoordinator.getSelectedEpisodeIndex()
         if (episodes.isEmpty()) {
-            Toast.makeText(activity, activity.getString(R.string.player_no_episodes_toast), Toast.LENGTH_SHORT).show()
+            AppToast.show(activity, activity.getString(R.string.player_no_episodes_toast))
             return
         }
         if (episodes.firstOrNull()?.source == VideoPlayerViewModel.EpisodeCatalogSource.UGC_SEASON) {
@@ -473,7 +474,7 @@ class VideoPlayerOverlayController(
     ) {
         val video = resolveCurrentVideoInfo()
         if (video == null) {
-            Toast.makeText(activity, activity.getString(R.string.player_video_info_not_loaded), Toast.LENGTH_SHORT).show()
+            AppToast.show(activity, activity.getString(R.string.player_video_info_not_loaded))
             return
         }
         if (restorePlayerFocus) {
@@ -556,7 +557,7 @@ class VideoPlayerOverlayController(
         val aid = view?.aid ?: 0L
         val bvid = view?.bvid.orEmpty()
         if (aid <= 0L && bvid.isBlank()) {
-            Toast.makeText(activity, activity.getString(R.string.player_video_info_not_loaded), Toast.LENGTH_SHORT).show()
+            AppToast.show(activity, activity.getString(R.string.player_video_info_not_loaded))
             return
         }
         overlayCoordinator.rememberFocusRestoreTarget(PlayerOverlayCoordinator.FocusTarget.MORE_BUTTON)
@@ -582,7 +583,7 @@ class VideoPlayerOverlayController(
         val view = latestVideoInfoProvider()?.view
         val owner = view?.owner
         if (owner == null || owner.mid <= 0L) {
-            Toast.makeText(activity, activity.getString(R.string.player_up_info_not_loaded), Toast.LENGTH_SHORT).show()
+            AppToast.show(activity, activity.getString(R.string.player_up_info_not_loaded))
             return
         }
         overlayCoordinator.rememberFocusRestoreTarget(PlayerOverlayCoordinator.FocusTarget.OWNER_BUTTON)
@@ -613,7 +614,7 @@ class VideoPlayerOverlayController(
     fun showCommentPanel() {
         val video = resolveCurrentVideoInfo()
         if (video == null || video.aid <= 0L) {
-            Toast.makeText(activity, activity.getString(R.string.player_video_info_not_loaded), Toast.LENGTH_SHORT).show()
+            AppToast.show(activity, activity.getString(R.string.player_video_info_not_loaded))
             return
         }
         overlayCoordinator.rememberFocusRestoreTarget(PlayerOverlayCoordinator.FocusTarget.COMMENT_BUTTON)

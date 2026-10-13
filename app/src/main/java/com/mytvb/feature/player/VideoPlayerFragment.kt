@@ -16,6 +16,7 @@ import android.widget.FrameLayout
 import com.mytvb.feature.player.sponsor.SponsorProgressMarkerView
 import android.widget.TextView
 import android.widget.Toast
+import com.mytvb.core.ui.base.AppToast
 import com.mytvb.core.common.ext.toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
@@ -853,11 +854,7 @@ class VideoPlayerFragment : Fragment() {
                     Player.REPEAT_MODE_ONE
                 }
                 playerView.setRepeatMode(currentPlayer.repeatMode)
-                Toast.makeText(
-                    requireContext(),
-                    if (currentPlayer.repeatMode == Player.REPEAT_MODE_ONE) getString(R.string.player_repeat_mode_one) else getString(R.string.player_repeat_mode_all),
-                    Toast.LENGTH_SHORT
-                ).show()
+                AppToast.show(requireContext(),if (currentPlayer.repeatMode == Player.REPEAT_MODE_ONE) getString(R.string.player_repeat_mode_one) else getString(R.string.player_repeat_mode_all))
             }
 
             override fun onDmEnableChange(enabled: Boolean) {
@@ -1046,7 +1043,7 @@ class VideoPlayerFragment : Fragment() {
                     viewModel.riskControlTryLookBypass.collect { bypassed ->
                         if (bypassed != true) return@collect
                         if (riskControlUserHintShown.compareAndSet(false, true)) {
-                            Toast.makeText(requireContext(), getString(R.string.player_risk_control_hint), Toast.LENGTH_LONG).show()
+                            AppToast.show(requireContext(), getString(R.string.player_risk_control_hint), Toast.LENGTH_LONG)
                         }
                     }
                 }
@@ -1785,7 +1782,7 @@ class VideoPlayerFragment : Fragment() {
         if (next == null) {
             playerView.cancelDouyinPageTransition()
             playerView.showDouyinBoundaryBounce(1)
-            Toast.makeText(requireContext(), getString(R.string.player_no_recommendation), Toast.LENGTH_SHORT).show()
+            AppToast.show(requireContext(), getString(R.string.player_no_recommendation))
             return true
         }
         playDouyinVideo(next, direction = 1)
@@ -1946,7 +1943,7 @@ class VideoPlayerFragment : Fragment() {
                 if (douyinPendingNextAfterInit) {
                     playerView.cancelDouyinPageTransition()
                     playerView.showDouyinBoundaryBounce(1)
-                    Toast.makeText(requireContext(), getString(R.string.player_no_recommendation), Toast.LENGTH_SHORT).show()
+                    AppToast.show(requireContext(), getString(R.string.player_no_recommendation))
                 }
                 douyinPendingNextAfterInit = false
                 return@launch
@@ -1958,7 +1955,7 @@ class VideoPlayerFragment : Fragment() {
                 if (next == null) {
                     playerView.cancelDouyinPageTransition()
                     playerView.showDouyinBoundaryBounce(1)
-                    Toast.makeText(requireContext(), getString(R.string.player_no_recommendation), Toast.LENGTH_SHORT).show()
+                    AppToast.show(requireContext(), getString(R.string.player_no_recommendation))
                 } else {
                     playDouyinVideo(next, direction = 1)
                 }

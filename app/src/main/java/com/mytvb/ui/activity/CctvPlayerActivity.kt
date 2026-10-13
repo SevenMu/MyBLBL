@@ -26,7 +26,7 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
-import android.widget.Toast
+
 import androidx.activity.OnBackPressedCallback
 import com.mytvb.core.ui.base.ChoiceDialog
 import androidx.lifecycle.lifecycleScope
@@ -44,6 +44,7 @@ import kotlin.math.abs
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.koin.android.ext.android.inject
+import com.mytvb.core.ui.base.AppToast
 
 class CctvPlayerActivity : BaseActivity<ActivityCctvPlayerBinding>() {
 
@@ -730,7 +731,7 @@ class CctvPlayerActivity : BaseActivity<ActivityCctvPlayerBinding>() {
             finish()
         } else {
             exitTime = now
-            Toast.makeText(applicationContext, R.string.activity_exit_player_hint, Toast.LENGTH_SHORT).show()
+            AppToast.show(applicationContext, R.string.activity_exit_player_hint)
         }
     }
 

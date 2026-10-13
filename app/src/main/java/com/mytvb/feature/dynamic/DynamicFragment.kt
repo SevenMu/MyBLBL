@@ -7,6 +7,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.Toast
 import androidx.fragment.app.activityViewModels
+import com.mytvb.core.ui.base.AppToast
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -534,9 +535,7 @@ class DynamicFragment : BaseFragment<FragmentDynamicBinding>(), MainTabFocusTarg
         if (shouldToastError) {
             val message = viewModel.error.value
             if (message != null && message != lastToastMessage) {
-                Toast.makeText(requireContext(), message, Toast.LENGTH_SHORT).apply {
-                    setGravity(Gravity.CENTER, 0, 0)
-                }.show()
+                AppToast.show(requireContext(), message, Toast.LENGTH_SHORT, Gravity.CENTER, 0)
                 lastToastMessage = message
             }
         } else if (!latestLoading) {

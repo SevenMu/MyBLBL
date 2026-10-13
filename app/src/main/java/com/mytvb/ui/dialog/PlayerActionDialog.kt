@@ -6,6 +6,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.Window
 import android.widget.Toast
+import com.mytvb.core.ui.base.AppToast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatDialog
 import androidx.core.content.ContextCompat
@@ -80,11 +81,7 @@ class PlayerActionDialog(
                     if (response.isSuccess) {
                         isLiked = !isLiked
                         renderState()
-                        Toast.makeText(
-                            context,
-                            if (isLiked) context.getString(R.string.liked_) else context.getString(R.string.like),
-                            Toast.LENGTH_SHORT
-                        ).show()
+                        AppToast.show(context,if (isLiked) context.getString(R.string.liked_) else context.getString(R.string.like))
                     } else {
                         AppLog.w("PlayerAction", "like failed: code=${response.code}, message=${response.message}")
                         handleActionError(response.code, response.message)
@@ -182,7 +179,7 @@ class PlayerActionDialog(
                         isFavorited = true
                         renderState()
                         if (response.data?.isRisk == true) {
-                            Toast.makeText(context, R.string.dialog_triple_success_risk_marked, Toast.LENGTH_LONG).show()
+                            AppToast.show(context, R.string.dialog_triple_success_risk_marked, Toast.LENGTH_LONG)
                         } else {
                             toast(context.getString(R.string.triple_action))
                         }
@@ -435,7 +432,7 @@ class PlayerActionDialog(
     }
 
     private fun toast(message: String) {
-        Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
+        AppToast.show(context, message)
     }
 
     override fun dismiss() {
@@ -477,7 +474,7 @@ class PlayerActionDialog(
                 toast(context.getString(R.string.dialog_action_failed_retry_later))
             }
             is ActionError.RiskControl -> {
-                Toast.makeText(context, R.string.dialog_risk_control_verify_hint, Toast.LENGTH_LONG).show()
+                AppToast.show(context, R.string.dialog_risk_control_verify_hint, Toast.LENGTH_LONG)
             }
             is ActionError.FrequencyLimit -> {
                 toast(error.message)
