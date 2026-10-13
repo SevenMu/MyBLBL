@@ -158,6 +158,10 @@ object DialogWindowFit {
         )
         dialog.setContentView(container)
         val w = dialog.window
+        // fill 窗口默认仍被限制在系统栏以内（实测窗口 frame=[0,36][1280,720]，高度少一个
+        // 状态栏），自绘遮罩容器只能铺满窗口，屏幕顶部会留一条未暗化的缝；
+        // LAYOUT_IN_SCREEN 让窗口覆盖整个屏幕，遮罩才能真正铺满四边。
+        w?.addFlags(WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN)
         w?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         if (cancelOnOutside) {
             // 只响应落在容器自身（卡片外暗区）的点击；卡片内的点击由内容消费。
