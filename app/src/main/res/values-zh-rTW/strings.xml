@@ -9,7 +9,7 @@
     <string name="video">影片</string>
     <string name="app_exit">再按一次返回退出應用程式</string>
     <string name="usage_tip_title">使用提示</string>
-    <string name="usage_tip_content">1. 本應用程式僅供學習研究使用，請勿用於商業用途，避免侵犯嗶哩嗶哩相關權益。&lt;br&gt;&lt;br&gt;2. 應用程式支援直播入口和青少年模式，均可在設定中開啟或關閉。&lt;br&gt;&lt;br&gt;3. 青少年模式關閉方法：&lt;b&gt;&lt;font color=\"#e74c3c\"&gt;遙控器依序按「上上下下左右左右」；觸控螢幕連續快速點按驗證碼區域 7 次即可通過驗證。&lt;/font&gt;&lt;/b&gt;&lt;br&gt;&lt;br&gt;4. 長按影片卡片可進行「稍後觀看」等更多操作。</string>
+    <string name="usage_tip_content">1. 本應用程式僅供學習研究使用，請勿用於商業用途，避免侵犯嗶哩嗶哩相關權益。&lt;br&gt;&lt;br&gt;2. 應用程式支援直播入口，可在設定中開啟或關閉。&lt;br&gt;&lt;br&gt;3. 長按影片卡片可進行「稍後觀看」等更多操作。</string>
     <string name="audioTrack">音軌</string>
     <string name="auto">汽車</string>
     <string name="back">返回</string>

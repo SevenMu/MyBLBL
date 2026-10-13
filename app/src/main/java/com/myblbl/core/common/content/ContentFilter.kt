@@ -586,7 +586,8 @@ object ContentFilter {
 
     @Suppress("UNUSED_PARAMETER")
     fun isMinorProtectionEnabled(context: Context): Boolean {
-        return appSettings.getCachedString(KEY_MINOR_PROTECTION) != "关"
+        // 默认关闭：仅用户在设置中显式开启（存储值为"开"）才启用青少年保护
+        return appSettings.getCachedString(KEY_MINOR_PROTECTION) == "开"
     }
 
     @Suppress("unused", "UNUSED_PARAMETER")

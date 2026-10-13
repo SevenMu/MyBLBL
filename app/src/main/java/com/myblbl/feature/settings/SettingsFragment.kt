@@ -354,7 +354,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
         // 青少年模式：时间限制 / 公益广告
         teenGroups = listOf(
             SettingGroup(R.string.setting_group_teen_time, listOf(
-                stored(KEY_MINOR_PROTECTION, R.string.minor_protection, "开"),
+                stored(KEY_MINOR_PROTECTION, R.string.minor_protection, "关"),
                 plain(KEY_WATCH_TIME_LIMIT, R.string.watch_time_limit, getString(R.string.setting_value_unlimited)),
                 plain(KEY_REST_TIME_LIMIT, R.string.rest_time_limit, getString(R.string.setting_value_unlimited))
             )),

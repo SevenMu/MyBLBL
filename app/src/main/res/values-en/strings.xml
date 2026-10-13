@@ -9,7 +9,7 @@
     <string name="video">Video</string>
     <string name="app_exit">Press back again to exit</string>
     <string name="usage_tip_title">Usage tips</string>
-    <string name="usage_tip_content">1. This app is for learning and research only. Do not use it commercially, to avoid infringing bilibili\'s rights.&lt;br&gt;&lt;br&gt;2. Live entry and teen mode are supported and can be turned on or off in Settings.&lt;br&gt;&lt;br&gt;3. To turn off teen mode: &lt;b&gt;&lt;font color=\"#e74c3c\"&gt;press Up, Up, Down, Down, Left, Right, Left, Right on the remote; on a touch screen, quickly tap the captcha area 7 times to pass verification.&lt;/font&gt;&lt;/b&gt;&lt;br&gt;&lt;br&gt;4. Long-press a video card for more actions such as Watch later.</string>
+    <string name="usage_tip_content">1. This app is for learning and research only. Do not use it commercially, to avoid infringing bilibili\'s rights.&lt;br&gt;&lt;br&gt;2. Live entry is supported and can be turned on or off in Settings.&lt;br&gt;&lt;br&gt;3. Long-press a video card for more actions such as Watch later.</string>
     <string name="audioTrack">Audio track</string>
     <string name="auto">Cars</string>
     <string name="back">Back</string>
