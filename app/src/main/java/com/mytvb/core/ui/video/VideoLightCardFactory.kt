@@ -1002,7 +1002,8 @@ private class LightCardMetrics private constructor(context: Context) {
     val avatarWidth = dimen(context, R.dimen.px40)
     val avatarHeight = dimen(context, R.dimen.px25)
     val badgeOwnerGap = dimen(context, R.dimen.px6)
-    val historyDeviceSize = dimen(context, R.dimen.px30)
+    // 设备图标与左上 UP 角标视觉等高（原 30dip 比 UP 图标大 35%，右组显得"大一圈"）
+    val historyDeviceSize = dimen(context, R.dimen.px22)
     val historyDeviceMarginEnd = dimen(context, R.dimen.px5)
     val playingIconMarginEnd = dp(context, 4)
     val titleIconFallbackSize = dimen(context, R.dimen.px31)
