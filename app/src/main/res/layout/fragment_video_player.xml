@@ -4,7 +4,7 @@
     android:descendantFocusability="afterDescendants"
     android:layout_width="match_parent"
     android:layout_height="match_parent">
-    <com.mytvb.feature.player.view.MyPlayerView
+    <com.myblbl.feature.player.view.MyPlayerView
         android:id="@+id/playerView"
         android:focusable="true"
         android:descendantFocusability="afterDescendants"
@@ -88,7 +88,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 android:scaleType="centerCrop"/>
-            <com.mytvb.feature.player.view.CountdownView
+            <com.myblbl.feature.player.view.CountdownView
                 android:id="@+id/countdown_view"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"/>
@@ -184,7 +184,7 @@
         android:layout_marginBottom="@dimen/px60"
         android:paddingStart="@dimen/px30"
         android:paddingEnd="@dimen/px30"/>
-    <com.mytvb.feature.player.sponsor.SponsorProgressMarkerView
+    <com.myblbl.feature.player.sponsor.SponsorProgressMarkerView
         android:layout_gravity="bottom"
         android:id="@+id/bottom_progress_bar"
         android:layout_width="match_parent"

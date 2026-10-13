@@ -46,12 +46,12 @@ abstract class FixSourceSetPathMapTask : DefaultTask() {
 }
 
 android {
-    namespace = "com.mytvb"
+    namespace = "com.myblbl"
     compileSdk = 35
 
     defaultConfig {
         // 默认包名；可通过 -PapplicationId=xxx 覆盖，用于 fork 版与原版共存安装
-        applicationId = (project.findProperty("applicationId") as? String) ?: "com.mytvb"
+        applicationId = (project.findProperty("applicationId") as? String) ?: "com.myblbl"
         minSdk = 23
         targetSdk = 35
         versionCode = 99
@@ -201,7 +201,7 @@ androidComponents {
         val renameTask = tasks.register("rename${capitalizedVariantName}Apk", RenameApkTask::class) {
             apkDirectory.set(variant.artifacts.get(com.android.build.api.artifact.SingleArtifact.APK))
             renamedApkDirectory.set(layout.buildDirectory.dir("outputs/renamed_apk/${variant.name}"))
-            appName.set("MyTVB")
+            appName.set("MyBLBL")
             buildType.set(variant.buildType)
             versionName.set(variant.outputs.single().versionName)
         }

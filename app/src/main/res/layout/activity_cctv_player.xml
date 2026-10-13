@@ -136,7 +136,7 @@
         android:gravity="center_vertical"
         android:orientation="horizontal">
 
-        <com.mytvb.feature.player.view.PlayerControlButton
+        <com.myblbl.feature.player.view.PlayerControlButton
             android:id="@+id/button_back"
             android:layout_width="@dimen/px80"
             android:layout_height="@dimen/px80"

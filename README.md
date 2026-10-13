@@ -1,4 +1,4 @@
-# MyTVB
+# MyBLBL
 
 📺 一个专为 Android TV 设计的第三方 Bilibili 客户端，同时适配手机、平板与车机触屏，像素级对齐 BLBL。
 

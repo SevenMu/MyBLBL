@@ -21,7 +21,7 @@
         app:layout_constraintStart_toStartOf="@+id/image_top"
         app:layout_constraintTop_toTopOf="@+id/image_top" />
 
-    <com.mytvb.core.ui.image.AvatarBadgeView
+    <com.myblbl.core.ui.image.AvatarBadgeView
         android:id="@+id/image_avatar"
         android:layout_width="0dp"
         android:layout_height="0dp"
@@ -64,7 +64,7 @@
         app:layout_constraintStart_toEndOf="@id/text_title"
         app:layout_constraintTop_toTopOf="@id/text_title">
 
-        <com.mytvb.core.ui.user.UserLevelBadgeView
+        <com.myblbl.core.ui.user.UserLevelBadgeView
             android:id="@+id/level_badge"
             android:layout_width="wrap_content"
             android:layout_height="@dimen/px30"

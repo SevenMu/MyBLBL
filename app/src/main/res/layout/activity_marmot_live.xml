@@ -84,7 +84,7 @@
         android:background="@drawable/player_top_gradient"
         android:visibility="gone">
 
-        <com.mytvb.feature.player.view.PlayerControlButton
+        <com.myblbl.feature.player.view.PlayerControlButton
             android:id="@+id/button_back"
             android:layout_width="@dimen/px80"
             android:layout_height="@dimen/px80"
@@ -254,7 +254,7 @@
         android:visibility="gone">
 
         <!-- 左侧：分组列表（央视/卫视/地方台...）FocusLockRecyclerView 防焦点溢出 -->
-        <com.mytvb.core.ui.focus.FocusLockRecyclerView
+        <com.myblbl.core.ui.focus.FocusLockRecyclerView
             android:id="@+id/group_list"
             android:layout_width="@dimen/px315"
             android:layout_height="match_parent"
@@ -267,7 +267,7 @@
             android:padding="@dimen/px18" />
 
         <!-- 右侧：频道列表 -->
-        <com.mytvb.core.ui.focus.FocusLockRecyclerView
+        <com.myblbl.core.ui.focus.FocusLockRecyclerView
             android:id="@+id/channel_list"
             android:layout_width="@dimen/px675"
             android:layout_height="match_parent"

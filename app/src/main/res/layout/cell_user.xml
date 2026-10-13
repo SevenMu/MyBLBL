@@ -12,7 +12,7 @@
     android:paddingEnd="@dimen/px10"
     android:paddingBottom="@dimen/px8">
 
-    <com.mytvb.core.ui.image.AvatarBadgeView
+    <com.myblbl.core.ui.image.AvatarBadgeView
         android:id="@+id/image_view"
         android:layout_width="@dimen/px90"
         android:layout_height="@dimen/px90"
@@ -43,7 +43,7 @@
         app:layout_constraintTop_toTopOf="parent"
         app:layout_constraintVertical_chainStyle="packed" />
 
-    <com.mytvb.core.ui.user.UserLevelBadgeView
+    <com.myblbl.core.ui.user.UserLevelBadgeView
         android:id="@+id/text_level"
         android:layout_width="wrap_content"
         android:layout_height="@dimen/px24"

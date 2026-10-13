@@ -36,17 +36,17 @@
             android:layout_height="@dimen/exo_error_message_height"
             android:layout_marginBottom="@dimen/exo_error_message_margin_bottom"/>
     </androidx.media3.ui.AspectRatioFrameLayout>
-    <com.mytvb.feature.player.view.DanmakuMaskHostLayout
+    <com.myblbl.feature.player.view.DanmakuMaskHostLayout
         android:id="@+id/dmk_mask_host"
         android:layout_gravity="top"
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
-    <com.mytvb.feature.player.view.LiveSuperChatHostView
+    <com.myblbl.feature.player.view.LiveSuperChatHostView
         android:id="@+id/super_chat_host"
         android:visibility="gone"
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
-    <com.mytvb.feature.player.interaction.InteractionOverlayView
+    <com.myblbl.feature.player.interaction.InteractionOverlayView
         android:id="@+id/interaction_view"
         android:visibility="gone"
         android:layout_width="match_parent"
@@ -73,7 +73,7 @@
         android:visibility="gone"
         android:layout_width="match_parent"
         android:layout_height="match_parent"/>
-    <com.mytvb.feature.player.view.MyPlayerSettingView
+    <com.myblbl.feature.player.view.MyPlayerSettingView
         android:id="@+id/setting_view"
         android:visibility="gone"
         android:layout_width="match_parent"

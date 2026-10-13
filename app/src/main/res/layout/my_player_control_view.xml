@@ -17,7 +17,7 @@
         android:layout_height="wrap_content"
         android:paddingStart="@dimen/px30"
         android:paddingEnd="@dimen/px30">
-        <com.mytvb.feature.player.view.PlayerControlButton
+        <com.myblbl.feature.player.view.PlayerControlButton
             android:id="@+id/button_back"
             android:background="@drawable/cell_background"
             android:padding="@dimen/px18"
@@ -93,7 +93,7 @@
                 android:shadowRadius="1.6"
                 app:layout_constraintTop_toBottomOf="@+id/text_title"/>
         </androidx.appcompat.widget.LinearLayoutCompat>
-        <com.mytvb.feature.player.view.DefaultTimeBar
+        <com.myblbl.feature.player.view.DefaultTimeBar
             android:id="@+id/exo_progress"
             android:nextFocusDown="@id/button_play"
             android:layout_width="match_parent"
@@ -121,7 +121,7 @@
                 android:layout_gravity="start|center_vertical"
                 android:gravity="center_vertical"
                 android:orientation="horizontal">
-                <com.mytvb.feature.player.view.PlayerControlButton
+                <com.myblbl.feature.player.view.PlayerControlButton
                     android:id="@+id/button_play"
                     android:background="@drawable/cell_background"
                     android:padding="@dimen/px32"
@@ -133,8 +133,8 @@
                     android:src="@drawable/ic_play"
                     android:contentDescription="@string/play_pause">
                     <requestFocus/>
-                </com.mytvb.feature.player.view.PlayerControlButton>
-                <com.mytvb.feature.player.view.PlayerControlButton
+                </com.myblbl.feature.player.view.PlayerControlButton>
+                <com.myblbl.feature.player.view.PlayerControlButton
                     android:id="@+id/button_comment"
                     android:background="@drawable/cell_background"
                     android:padding="@dimen/px29"
@@ -145,7 +145,7 @@
                     android:layout_height="@dimen/px113"
                     android:src="@drawable/ic_comment"
                     android:contentDescription="@string/player_comment_title"/>
-                <com.mytvb.feature.player.view.PlayerControlButton
+                <com.myblbl.feature.player.view.PlayerControlButton
                     android:id="@+id/button_more"
                     android:background="@drawable/cell_background"
                     android:padding="@dimen/px23"
@@ -156,7 +156,7 @@
                     android:layout_height="@dimen/px113"
                     android:src="@drawable/ic_more"
                     android:contentDescription="@string/more"/>
-                <com.mytvb.feature.player.view.PlayerControlButton
+                <com.myblbl.feature.player.view.PlayerControlButton
                     android:id="@+id/button_refresh"
                     android:background="@drawable/cell_background"
                     android:padding="@dimen/px25"
@@ -168,7 +168,7 @@
                     android:src="@drawable/ic_refresh"
                     android:visibility="gone"
                     android:contentDescription="@string/refresh"/>
-                <com.mytvb.feature.player.view.PlayerControlButton
+                <com.myblbl.feature.player.view.PlayerControlButton
                     android:id="@+id/button_previous"
                     android:background="@drawable/cell_background"
                     android:padding="@dimen/px32"
@@ -179,7 +179,7 @@
                     android:layout_height="@dimen/px113"
                     android:src="@drawable/ic_previous"
                     android:contentDescription="@string/previous_ep"/>
-                <com.mytvb.feature.player.view.PlayerControlButton
+                <com.myblbl.feature.player.view.PlayerControlButton
                     android:id="@+id/button_next"
                     android:background="@drawable/cell_background"
                     android:padding="@dimen/px32"
@@ -190,7 +190,7 @@
                     android:layout_height="@dimen/px113"
                     android:src="@drawable/ic_next"
                     android:contentDescription="@string/next_ep"/>
-                <com.mytvb.feature.player.view.PlayerControlButton
+                <com.myblbl.feature.player.view.PlayerControlButton
                     android:id="@+id/button_rewind"
                     android:background="@drawable/cell_background"
                     android:padding="@dimen/px11"
@@ -201,7 +201,7 @@
                     android:layout_height="@dimen/px113"
                     android:src="@drawable/ic_rewind"
                     android:contentDescription="@string/rewind"/>
-                <com.mytvb.feature.player.view.PlayerControlButton
+                <com.myblbl.feature.player.view.PlayerControlButton
                     android:id="@+id/button_fast_forward"
                     android:background="@drawable/cell_background"
                     android:padding="@dimen/px11"
@@ -212,7 +212,7 @@
                     android:layout_height="@dimen/px113"
                     android:src="@drawable/ic_fast_forward"
                     android:contentDescription="@string/fast_forward"/>
-                <com.mytvb.feature.player.view.PlayerControlButton
+                <com.myblbl.feature.player.view.PlayerControlButton
                     android:id="@+id/button_dm_switch"
                     android:background="@drawable/cell_background"
                     android:padding="@dimen/px18"
@@ -224,7 +224,7 @@
                     android:layout_height="@dimen/px113"
                     android:src="@drawable/ic_dm_enable"
                     android:contentDescription="@string/dm_switch"/>
-                <com.mytvb.feature.player.view.PlayerControlButton
+                <com.myblbl.feature.player.view.PlayerControlButton
                     android:id="@+id/button_sc_switch"
                     android:background="@drawable/cell_background"
                     android:padding="@dimen/px18"
@@ -236,7 +236,7 @@
                     android:layout_height="@dimen/px113"
                     android:src="@drawable/ic_sc_enable"
                     android:contentDescription="@string/sc_switch"/>
-                <com.mytvb.feature.player.view.PlayerControlButton
+                <com.myblbl.feature.player.view.PlayerControlButton
                     android:id="@+id/button_mirror"
                     android:background="@drawable/cell_background"
                     android:padding="@dimen/px18"
@@ -248,7 +248,7 @@
                     android:layout_height="@dimen/px113"
                     android:src="@drawable/ic_mirror_off"
                     android:contentDescription="@string/screen_mirror"/>
-                <com.mytvb.feature.player.view.PlayerControlButton
+                <com.myblbl.feature.player.view.PlayerControlButton
                     android:id="@+id/button_play_speed"
                     android:background="@drawable/cell_background"
                     android:padding="@dimen/px30"
@@ -260,7 +260,7 @@
                     android:layout_height="@dimen/px113"
                     android:src="@drawable/exo_ic_speed"
                     android:contentDescription="@string/playSpeed"/>
-                <com.mytvb.feature.player.view.PlayerControlButton
+                <com.myblbl.feature.player.view.PlayerControlButton
                     android:id="@+id/exo_settings"
                     android:background="@drawable/cell_background"
                     android:padding="@dimen/px23"
@@ -271,7 +271,7 @@
                     android:layout_height="@dimen/px113"
                     android:src="@drawable/ic_player_setting"
                     android:contentDescription="@string/setting"/>
-                <com.mytvb.feature.player.view.PlayerControlButton
+                <com.myblbl.feature.player.view.PlayerControlButton
                     android:id="@+id/button_choose_episode"
                     android:background="@drawable/cell_background"
                     android:padding="@dimen/px34"
@@ -282,7 +282,7 @@
                     android:layout_height="@dimen/px113"
                     android:src="@drawable/ic_list"
                     android:contentDescription="@string/choose_episode"/>
-                <com.mytvb.feature.player.view.PlayerControlButton
+                <com.myblbl.feature.player.view.PlayerControlButton
                     android:id="@+id/button_up_info"
                     android:background="@drawable/cell_background"
                     android:padding="@dimen/px29"
@@ -293,7 +293,7 @@
                     android:layout_height="@dimen/px113"
                     android:src="@drawable/ic_user"
                     android:contentDescription="@string/up_info"/>
-                <com.mytvb.feature.player.view.PlayerControlButton
+                <com.myblbl.feature.player.view.PlayerControlButton
                     android:id="@+id/button_subtitle"
                     android:background="@drawable/cell_background"
                     android:padding="@dimen/px25"
@@ -305,7 +305,7 @@
                     android:layout_height="@dimen/px113"
                     android:src="@drawable/ic_subtitles"
                     android:contentDescription="@string/subtitle"/>
-                <com.mytvb.feature.player.view.PlayerControlButton
+                <com.myblbl.feature.player.view.PlayerControlButton
                     android:id="@+id/button_related"
                     android:background="@drawable/cell_background"
                     android:padding="@dimen/px23"
@@ -316,7 +316,7 @@
                     android:layout_height="@dimen/px113"
                     android:src="@drawable/arrow_down"
                     android:contentDescription="@string/related_video"/>
-                <com.mytvb.feature.player.view.PlayerControlButton
+                <com.myblbl.feature.player.view.PlayerControlButton
                     android:id="@+id/button_repeat"
                     android:background="@drawable/cell_background"
                     android:padding="@dimen/px25"
@@ -328,7 +328,7 @@
                     android:layout_height="@dimen/px113"
                     android:src="@drawable/ic_order_all_play"
                     android:contentDescription="@string/play_order"/>
-                <com.mytvb.feature.player.view.PlayerControlButton
+                <com.myblbl.feature.player.view.PlayerControlButton
                     android:id="@+id/button_line"
                     android:background="@drawable/cell_background"
                     android:padding="@dimen/px25"
@@ -340,7 +340,7 @@
                     android:layout_height="@dimen/px113"
                     android:src="@drawable/ic_line_switch"
                     android:contentDescription="@string/live_line"/>
-                <com.mytvb.feature.player.view.PlayerControlButton
+                <com.myblbl.feature.player.view.PlayerControlButton
                     android:id="@+id/button_live_settings"
                     android:background="@drawable/cell_background"
                     android:padding="@dimen/px25"
@@ -352,7 +352,7 @@
                     android:layout_height="@dimen/px113"
                     android:src="@drawable/ic_setting"
                     android:contentDescription="@string/live_quality"/>
-                <com.mytvb.feature.player.view.PlayerControlButton
+                <com.myblbl.feature.player.view.PlayerControlButton
                     android:id="@+id/button_close"
                     android:background="@drawable/cell_background"
                     android:padding="@dimen/px25"
@@ -364,7 +364,7 @@
                     android:src="@drawable/ic_close"
                     android:contentDescription="@string/close"
                     android:visibility="gone"/>
-                <com.mytvb.feature.player.view.PlayerControlButton
+                <com.myblbl.feature.player.view.PlayerControlButton
                     android:id="@+id/exo_overflow_show"
                     android:background="@drawable/cell_background"
                     android:padding="@dimen/px23"
@@ -394,7 +394,7 @@
                     android:layout_height="wrap_content"
                     android:gravity="center_vertical"
                     android:orientation="horizontal">
-                    <com.mytvb.feature.player.view.PlayerControlButton
+                    <com.myblbl.feature.player.view.PlayerControlButton
                         android:id="@+id/exo_overflow_hide"
                         android:background="@drawable/cell_background"
                         android:padding="@dimen/px22"

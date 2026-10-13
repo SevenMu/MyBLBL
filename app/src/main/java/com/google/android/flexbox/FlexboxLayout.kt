@@ -4,7 +4,7 @@ import android.content.Context
 import android.util.AttributeSet
 import android.view.View
 import android.view.ViewGroup
-import com.mytvb.R
+import com.myblbl.R
 import kotlin.math.max
 
 /**

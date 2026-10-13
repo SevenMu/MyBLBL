@@ -19,7 +19,7 @@
         android:textSize="@dimen/px36"
         android:textStyle="bold" />
 
-    <com.mytvb.ui.widget.NonFocusableScrollView
+    <com.myblbl.ui.widget.NonFocusableScrollView
         android:id="@+id/text_scroll"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -35,7 +35,7 @@
             android:text=""
             android:textColor="?android:attr/textColorSecondary"
             android:textSize="@dimen/px30" />
-    </com.mytvb.ui.widget.NonFocusableScrollView>
+    </com.myblbl.ui.widget.NonFocusableScrollView>
 
     <androidx.appcompat.widget.AppCompatTextView
         android:id="@+id/button_confirm"
