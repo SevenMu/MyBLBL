@@ -12,6 +12,7 @@ import androidx.appcompat.app.AppCompatDialog
 import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.RecyclerView
 import com.mytvb.R
+import com.mytvb.core.common.content.ContentFilter
 import com.mytvb.core.common.log.AppLog
 import com.mytvb.core.ui.decoration.LinearSpacingItemDecoration
 import com.mytvb.databinding.DialogVideoCardMenuBinding
@@ -39,7 +40,10 @@ class VideoCardMenuDialog(
     private val onDislikeVideo: (() -> Unit)? = null,
     private val onDislikeUp: ((String) -> Unit)? = null,
     private val onFavoriteRemoved: (() -> Unit)? = null,
-    private val onHistoryRecordDeleted: (() -> Unit)? = null
+    private val onHistoryRecordDeleted: (() -> Unit)? = null,
+    // 直播推荐页传 true 才显示「不想看该分区」；分区详情页用户主动进入，屏蔽会清空列表
+    private val allowAreaDislike: Boolean = false,
+    private val onDislikeArea: ((String) -> Unit)? = null
 ) : AppCompatDialog(context, R.style.DialogTheme), KoinComponent {
 
     companion object {
@@ -74,6 +78,12 @@ class VideoCardMenuDialog(
     // UP 主信息是否就绪：owner 缺失或 mid<=0 时（如关注/动态页扁平结构未带 owner），
     // “UP主主页”不可跳转、“不感兴趣UP”也无法生效，统一由此字段兜底显隐与可用性。
     private val supportsUpSpace = video.owner?.let { it.mid > 0L } == true
+    // 直播卡片无 aid，收藏接口必失败，直接隐藏收藏入口
+    private val supportsFavorite = !isLiveFeedbackCard
+    // 「不感兴趣当前直播」对直播价值很小（主播和分区两个维度已覆盖），直播卡片隐藏
+    private val supportsDislikeVideo = !isLiveFeedbackCard
+    // 「不想看该分区」：仅直播推荐流开放；typeName 由 LiveRoomAdapter 用二级分区名填充
+    private val supportsAreaDislike = allowAreaDislike && isLiveFeedbackCard && video.typeName.isNotBlank()
 
     init {
         supportRequestWindowFeature(Window.FEATURE_NO_TITLE)
@@ -194,6 +204,17 @@ class VideoCardMenuDialog(
             setActionInProgress(true)
             dislikeVideo(REASON_ID_DISLIKE_UP)
         }
+
+        binding.buttonDislikeArea.setOnClickListener {
+            if (!supportsAreaDislike) return@setOnClickListener
+            // 纯本地屏蔽，无需登录态
+            val areaName = video.typeName.trim()
+            if (areaName.isBlank()) return@setOnClickListener
+            ContentFilter.addBlockedLiveArea(context, areaName)
+            toast(context.getString(R.string.toast_dislike_area_success, areaName))
+            onDislikeArea?.invoke(areaName)
+            dismiss()
+        }
     }
 
     private fun dislikeVideo(reasonId: Int) {
@@ -206,37 +227,20 @@ class VideoCardMenuDialog(
                         toast(context.getString(R.string.toast_dislike_up_success))
                         val upName = video.authorName.trim()
                         if (upName.isNotBlank()) {
+                            // 直播卡片写直播专属主播名单，刷新后不再出现；
+                            // 不写视频侧 blocked_up_names——那会被收藏页过滤，误伤用户已收藏的投稿
+                            if (isLiveFeedbackCard) {
+                                ContentFilter.addBlockedLiveAnchor(context, upName)
+                            }
                             onDislikeUp?.invoke(upName)
                         }
                     } else {
-                        toast(
-                            context.getString(
-                                if (supportsWatchLater) {
-                                    R.string.toast_dislike_video_success
-                                } else if (isLiveFeedbackCard) {
-                                    R.string.toast_dislike_live_success
-                                } else {
-                                    R.string.toast_dislike_video_success
-                                }
-                            )
-                        )
+                        toast(context.getString(R.string.toast_dislike_video_success))
                         onDislikeVideo?.invoke()
                     }
                     dismiss()
                 } else {
-                    toast(
-                        context.getString(
-                            if (reasonId == REASON_ID_DISLIKE_UP) {
-                                R.string.toast_dislike_up_failed
-                            } else if (isLiveFeedbackCard) {
-                                R.string.toast_dislike_live_failed
-                            } else if (supportsWatchLater) {
-                                R.string.toast_dislike_video_failed
-                            } else {
-                                R.string.toast_dislike_video_failed
-                            }
-                        )
-                    )
+                    toast(context.getString(R.string.toast_dislike_video_failed))
                     setActionInProgress(false)
                 }
             }.onFailure {
@@ -245,19 +249,7 @@ class VideoCardMenuDialog(
                     "dislikeVideo failure: reasonId=$reasonId, aid=${video.aid}, bvid=${video.bvid}, ownerMid=${video.owner?.mid ?: 0L}, message=${it.message}",
                     it
                 )
-                toast(
-                    context.getString(
-                        if (reasonId == REASON_ID_DISLIKE_UP) {
-                            R.string.toast_dislike_up_failed
-                        } else if (isLiveFeedbackCard) {
-                            R.string.toast_dislike_live_failed
-                        } else if (supportsWatchLater) {
-                            R.string.toast_dislike_video_failed
-                        } else {
-                            R.string.toast_dislike_video_failed
-                        }
-                    )
-                )
+                toast(context.getString(R.string.toast_dislike_video_failed))
                 setActionInProgress(false)
             }
         }
@@ -526,6 +518,7 @@ class VideoCardMenuDialog(
     }
 
     private fun refreshFavoriteState() {
+        if (!supportsFavorite) return
         if (!sessionGateway.isLoggedIn()) return
         scope.launch {
             val currentUserMid = sessionGateway.getUserInfo()?.mid?.takeIf { it > 0L } ?: return@launch
@@ -578,6 +571,9 @@ class VideoCardMenuDialog(
         binding.buttonWatchLater.visibility = if (supportsWatchLater) View.VISIBLE else View.GONE
         binding.buttonVideoDetail.visibility = if (supportsVideoDetail) View.VISIBLE else View.GONE
         binding.buttonUpSpace.visibility = if (supportsUpSpace) View.VISIBLE else View.GONE
+        binding.buttonFavorite.visibility = if (supportsFavorite) View.VISIBLE else View.GONE
+        binding.buttonDislikeVideo.visibility = if (supportsDislikeVideo) View.VISIBLE else View.GONE
+        binding.buttonDislikeArea.visibility = if (supportsAreaDislike) View.VISIBLE else View.GONE
         recomputeFocusChain()
         binding.textFavoriteSummary.text = context.getString(R.string.menu_favorite_summary)
         binding.textSubtitle.text = context.getString(
@@ -587,27 +583,16 @@ class VideoCardMenuDialog(
                 R.string.menu_video_card_subtitle
             }
         )
-        binding.textDislikeVideoTitle.text = context.getString(
-            if (isLiveFeedbackCard) {
-                R.string.menu_dislike_live
-            } else {
-                R.string.menu_dislike_video
-            }
-        )
-        binding.textDislikeVideoSummary.text = context.getString(
-            if (isLiveFeedbackCard) {
-                R.string.menu_dislike_live_summary
-            } else {
-                R.string.menu_dislike_video_summary
-            }
-        )
+        binding.textDislikeVideoTitle.text = context.getString(R.string.menu_dislike_video)
+        binding.textDislikeVideoSummary.text = context.getString(R.string.menu_dislike_video_summary)
         renderWatchLaterState()
         renderFavoriteState()
         renderDislikeUpState()
+        renderDislikeAreaState()
     }
 
     /**
-     * 根据“删除历史/稍后再看/UP主主页”三者的实际显隐，重连纵向 nextFocus 关系，
+     * 根据各菜单项的实际显隐，重连纵向 nextFocus 关系，
      * 避免某个按钮被 GONE 后方向键焦点悬空或落到隐藏项上。
      */
     private fun recomputeFocusChain() {
@@ -616,6 +601,11 @@ class VideoCardMenuDialog(
             if (supportsWatchLater) add(R.id.button_watch_later)
             if (supportsVideoDetail) add(R.id.button_video_detail)
             if (supportsUpSpace) add(R.id.button_up_space)
+            if (supportsFavorite) add(R.id.button_favorite)
+            if (supportsDislikeVideo) add(R.id.button_dislike_video)
+            // dislike_up 恒显示（信息不全时仅置灰禁用）
+            add(R.id.button_dislike_up)
+            if (supportsAreaDislike) add(R.id.button_dislike_area)
         }
         val indexById = focusableButtons.withIndex().associate { (i, id) -> id to i }
         for (id in focusableButtons) {
@@ -654,11 +644,19 @@ class VideoCardMenuDialog(
         binding.buttonDislikeUp.alpha = if (canDislikeUp()) 1f else 0.45f
     }
 
+    private fun renderDislikeAreaState() {
+        if (!supportsAreaDislike) return
+        binding.textDislikeAreaTitle.text =
+            context.getString(R.string.menu_dislike_area_title_with_name, video.typeName.trim())
+        binding.textDislikeAreaSummary.text =
+            context.getString(R.string.menu_dislike_area_summary)
+    }
+
     private fun setActionInProgress(inProgress: Boolean) {
         isActionInProgress = inProgress
         val watchLaterEnabled = supportsWatchLater && !inProgress
-        val favoriteEnabled = !inProgress
-        val dislikeVideoEnabled = !inProgress
+        val favoriteEnabled = supportsFavorite && !inProgress
+        val dislikeVideoEnabled = supportsDislikeVideo && !inProgress
         val deleteHistoryEnabled = supportsHistoryRecordDelete && !inProgress
         binding.buttonDeleteHistoryRecord.isEnabled = deleteHistoryEnabled
         binding.buttonDeleteHistoryRecord.isClickable = deleteHistoryEnabled
