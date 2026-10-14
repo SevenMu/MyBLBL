@@ -263,14 +263,35 @@ class SeriesDetailFragment : Fragment() {
     }
 
     private fun playSectionVideo(video: VideoModel) {
-        if ((video.bvid.isNotBlank() || video.epid > 0L) && video.cid > 0) {
+        // 分区条目（花絮/预告/PV/UP论道等）统一按 UGC 视频播放：
+        // - ep/page 回填后正片类分区条目已有 bvid/cid，可直接播；
+        // - UGC 挂载类条目（cid=0 无 bvid）从 link（/video/BVxxx）解析 BV 号兜底；
+        // - 必须剥离 epId/seasonId/redirectUrl：花絮条目带 epid 时播放器走 PGC season
+        //   路径，epid 不在正片剧集列表中会回落到第 1 集正片（redirectUrl 里的
+        //   /bangumi/play/ep 也会被重新解析出 PGC 身份，一并清除）。
+        val playbackVideo = video.toSectionPlaybackVideo()
+        if (playbackVideo.bvid.isNotBlank() || playbackVideo.aid > 0L) {
             VideoRouteNavigator.openVideo(
                 context = requireContext(),
-                video = video,
-                playQueue = buildSectionPlayQueue(video),
+                video = playbackVideo,
+                playQueue = buildSectionPlayQueue(playbackVideo),
                 forcePlayer = true
             )
         }
+    }
+
+    /** 分区条目播放形态：剥离 PGC 身份（防止播放器走 season 路径回落正片），bvid 缺失时从 link 解析。 */
+    private fun VideoModel.toSectionPlaybackVideo(): VideoModel {
+        val resolvedBvid = bvid.takeIf { it.isNotBlank() }
+            ?: redirectUrl.substringAfter("/video/", "")
+                .takeWhile { it.isLetterOrDigit() }
+                .takeIf { it.startsWith("BV") }
+        return copy(
+            bvid = resolvedBvid.orEmpty(),
+            epid = 0L,
+            sid = 0L,
+            redirectUrl = ""
+        )
     }
 
     override fun onDestroyView() {
@@ -578,7 +599,10 @@ class SeriesDetailFragment : Fragment() {
                 }
             }
         } ?: return emptyList()
-        return com.myblbl.ui.activity.PlayerActivity.buildPlayQueue(ownerSection.episodes, current)
+        // 队列条目同样剥离 PGC 身份（连播/手动切集时才能按 UGC 路径命中对应花絮，
+        // 否则播放器 season 定位失败会回落到第 1 集正片）
+        val sectionQueueItems = ownerSection.episodes.map { it.toSectionPlaybackVideo() }
+        return com.myblbl.ui.activity.PlayerActivity.buildPlayQueue(sectionQueueItems, current)
     }
 
     private fun EpisodeModel.toPlaybackVideoModel(seasonId: Long): VideoModel {

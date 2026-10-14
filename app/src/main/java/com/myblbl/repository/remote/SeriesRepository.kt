@@ -2,15 +2,21 @@ package com.myblbl.repository.remote
 
 import com.myblbl.R
 import com.myblbl.MyBLBLApplication
+import com.myblbl.core.common.log.AppLog
 import com.myblbl.model.series.CheckUserSeriesResult
 import com.myblbl.model.series.EpisodesDetailModel
 import com.myblbl.model.series.FollowSeriesResult
 import com.myblbl.model.series.MyFollowingResponseWrapper
 import com.myblbl.model.series.RelatedRecommendResult
+import com.myblbl.model.series.SectionModel
 import com.myblbl.model.series.timeline.TimeLineADayModel
+import com.myblbl.model.video.VideoModel
 import com.myblbl.network.api.ApiService
 import com.myblbl.network.security.NetworkSecurityGateway
 import com.myblbl.network.session.NetworkSessionGateway
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 
 class SeriesRepository(
     private val apiService: ApiService,
@@ -45,9 +51,17 @@ class SeriesRepository(
                 } else {
                     null
                 }
+                // season/section 条目缺 bvid/ep_id（cid 可能为 0），逐分区走 ep/page
+                // 分页详情回填播放身份（并行拉取，单分区失败保持原数据不阻塞详情加载）
+                val rawSections = sectionResult?.section.orEmpty()
+                val enrichedSections = if (resolvedSeasonId > 0 && rawSections.isNotEmpty()) {
+                    enrichSectionsFromEpPage(resolvedSeasonId, rawSections)
+                } else {
+                    rawSections
+                }
                 val mergedDetail = detail.copy(
                     episodes = sectionResult?.mainSection?.episodes.orEmpty(),
-                    section = sectionResult?.section.orEmpty(),
+                    section = enrichedSections,
                     mainSectionTitle = sectionResult?.mainSection?.title.orEmpty()
                 )
                 mergedDetail
@@ -55,6 +69,69 @@ class SeriesRepository(
                 throw IllegalStateException(response.errorMessage)
             }
         }
+    }
+
+    /**
+     * 并行回填各分区的播放身份：每分区先取第 0 页（响应含全部分页元信息 pages_meta），
+     * 按元信息逐页翻取后按 aid 匹配，把 season/section 缺失的 bvid/cid/epid/duration
+     * 补到对应条目上（标题/封面等展示字段保持 section 原值，最小侵入）。
+     */
+    private suspend fun enrichSectionsFromEpPage(
+        seasonId: Long,
+        sections: List<SectionModel>
+    ): List<SectionModel> = coroutineScope {
+        sections.map { section ->
+            async {
+                runCatching { enrichSectionFromEpPage(seasonId, section) }
+                    .onFailure { e ->
+                        AppLog.w(
+                            "SeriesDetail",
+                            "enrichSectionFromEpPage failed: sectionId=${section.id} reason=${e.message}"
+                        )
+                    }
+                    .getOrDefault(section)
+            }
+        }.awaitAll()
+    }
+
+    private suspend fun enrichSectionFromEpPage(seasonId: Long, section: SectionModel): SectionModel {
+        if (section.id <= 0 || section.episodes.isEmpty()) {
+            return section
+        }
+        val firstPage = apiService.getEpPage(seasonId = seasonId, sectionId = section.id, pageIndex = 0)
+        if (!firstPage.isSuccess) {
+            return section
+        }
+        val pageSection = firstPage.result?.sections?.firstOrNull { it.sectionId == section.id }
+            ?: firstPage.result?.sections?.firstOrNull()
+            ?: return section
+        val collected = mutableListOf<VideoModel>()
+        collected.addAll(pageSection.pages.flatMap { it.episodes })
+        val totalPages = pageSection.pagesMeta.size
+        if (totalPages > 1) {
+            for (pageIndex in 1 until totalPages) {
+                runCatching {
+                    apiService.getEpPage(seasonId = seasonId, sectionId = section.id, pageIndex = pageIndex)
+                }.onSuccess { page ->
+                    page.result?.sections?.firstOrNull { it.sectionId == section.id }
+                        ?.let { matched -> collected.addAll(matched.pages.flatMap { it.episodes }) }
+                }
+            }
+        }
+        if (collected.isEmpty()) {
+            return section
+        }
+        val byAid = collected.filter { it.aid > 0L }.associateBy { it.aid }
+        val enrichedEpisodes = section.episodes.map { episode ->
+            val source = byAid[episode.aid] ?: return@map episode
+            episode.copy(
+                bvid = episode.bvid.ifBlank { source.bvid },
+                cid = if (episode.cid > 0L) episode.cid else source.cid,
+                epid = if (episode.epid > 0L) episode.epid else source.epid,
+                duration = if (episode.duration > 0L) episode.duration else source.duration
+            )
+        }
+        return section.copy(episodes = enrichedEpisodes)
     }
 
     suspend fun checkUserFollowStatus(seasonId: Long, epId: Long = 0): Result<CheckUserSeriesResult> {

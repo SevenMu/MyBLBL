@@ -45,6 +45,21 @@ object VideoRouteNavigator {
             context.toast("当前卡片数据不完整，暂时无法播放")
             return
         }
+        // PGC 剧集条目（历史的番剧/影视记录等）→ 剧集详情页选集：
+        // 剧集级 aid（无 bvid）走 UGC 详情页会拿到单集花絮数据，页面内容错乱
+        if (video.isPgc && video.playbackSeasonId > 0L) {
+            val hostActivity = findMainActivityHost(context)
+            AppLog.d(TAG, "openVideo: pgc season, host=$hostActivity seasonId=${video.playbackSeasonId}")
+            if (hostActivity != null) {
+                hostActivity.openInHostContainer(
+                    com.myblbl.feature.series.SeriesDetailFragment.newInstance(
+                        seasonId = video.playbackSeasonId,
+                        epId = video.playbackEpId
+                    )
+                )
+                return
+            }
+        }
         if (!forcePlayer && shouldOpenVideoDetailFirst(video)) {
             val hostActivity = findMainActivityHost(context)
             AppLog.d(TAG, "openVideo: detailFirst=true, host=$hostActivity")

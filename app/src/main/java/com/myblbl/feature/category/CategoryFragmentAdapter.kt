@@ -23,7 +23,7 @@ class CategoryFragmentAdapter(
 
     override fun createFragment(position: Int): Fragment {
         val category = categories[position]
-        return CategoryListFragment.newInstance(category.id, category.name)
+        return CategoryListFragment.newInstance(category.id, category.name, category.isPgc)
     }
 
     override fun getItemId(position: Int): Long = categories[position].id.toLong()

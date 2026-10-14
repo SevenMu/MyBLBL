@@ -267,7 +267,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
                 stored(KEY_DEFAULT_START_PAGE, R.string.default_start_page, "热门"),
                 stored(KEY_LIVE_ENTRY, R.string.live_entry, "关"),
                 stored(KEY_CCTV_LIVE_ENTRY, R.string.cctv_live, "关"),
-                stored(KEY_SHOW_VIDEO_DETAIL, R.string.show_video_detail_page, "开"),
+                stored(KEY_SHOW_VIDEO_DETAIL, R.string.show_video_detail_page, "关"),
                 stored(KEY_DOUYIN_MODE, R.string.douyin_mode, "关"),
                 stored(KEY_GIVE_COIN_NUMBER, R.string.give_coin_number, "2"),
                 plain(KEY_HOME_REGIONS, R.string.setting_home_regions, HomeRegionCatalog.selectedCountText(appSettings))

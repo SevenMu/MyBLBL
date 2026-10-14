@@ -23,7 +23,7 @@ fun Context.toast(@StringRes resId: Int, duration: Int = Toast.LENGTH_SHORT) {
 }
 
 fun isOpenDetailFirstEnabled(): Boolean {
-    return getToggleSetting("show_video_detail", true)
+    return getToggleSetting("show_video_detail", false)
 }
 
 fun getDanmakuSmartFilterLevel(): Int {

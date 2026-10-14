@@ -39,9 +39,11 @@ class CategoryViewModel(
         _error.value = null
     }
 
-    fun loadCategoryVideos(rid: Int, forceRefresh: Boolean = false) {
+    fun loadCategoryVideos(rid: Int, isPgc: Boolean = false, forceRefresh: Boolean = false) {
+        // PGC 板块缓存 key 用负数 season_type，与普通分区正数 rid 永不冲突
+        val cacheKey = if (isPgc) -rid else rid
         if (!forceRefresh) {
-            categoryCache[rid]?.let { cachedEntry ->
+            categoryCache[cacheKey]?.let { cachedEntry ->
                 _error.value = null
                 _hasLoaded.value = true
                 _videos.value = cachedEntry.videos
@@ -53,13 +55,17 @@ class CategoryViewModel(
         _error.value = null
         viewModelScope.launch {
             runCatching {
-                videoRepository.getRanking(rid)
+                if (isPgc) {
+                    videoRepository.getPgcSeasonRank(rid)
+                } else {
+                    videoRepository.getRanking(rid)
+                }
             }.onSuccess { response ->
                 _loading.value = false
                 _hasLoaded.value = true
                 if (response.isSuccess) {
                     val videoList = response.data.orEmpty()
-                    categoryCache[rid] = CategoryCacheEntry(
+                    categoryCache[cacheKey] = CategoryCacheEntry(
                         videos = videoList,
                         updatedAt = System.currentTimeMillis()
                     )
@@ -86,8 +92,9 @@ class CategoryViewModel(
         }
     }
 
-    fun isCacheStale(rid: Int, ttlMs: Long): Boolean {
-        val updatedAt = categoryCache[rid]?.updatedAt ?: return true
+    fun isCacheStale(rid: Int, isPgc: Boolean = false, ttlMs: Long): Boolean {
+        val cacheKey = if (isPgc) -rid else rid
+        val updatedAt = categoryCache[cacheKey]?.updatedAt ?: return true
         return System.currentTimeMillis() - updatedAt >= ttlMs
     }
 }

@@ -2202,7 +2202,10 @@ class VideoPlayerViewModel(
         // switch to PGC playback path so the episode list shows all episodes.
         val redirectUrl = detail.view?.redirectUrl.orEmpty()
         val pgcEpId = parseEpIdFromBangumiUrl(redirectUrl)
-        if (pgcEpId > 0L) {
+        // 仅在入口无 cid 时升级：番剧挂载的花絮/PV/预告等条目 redirect 到自身 ep 页，
+        // 但不在正片剧集列表中，带 cid 升级后 resolve 不命中会回落第 1 集正片、
+        // 丢失点击目标（剧集详情页分区条目带完整 bvid/cid 进入，按 UGC 原样直接播）。
+        if (pgcEpId > 0L && currentCid <= 0L) {
             val pgcSeasonId = parseSeasonIdFromBangumiUrl(redirectUrl)
             currentEpId = pgcEpId
             currentSeasonId = pgcSeasonId.takeIf { it > 0L }

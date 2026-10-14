@@ -192,6 +192,30 @@ object BiliApi {
         }
     }
 
+    /**
+     * 剧集排行榜（bilibili-API-collect docs/bangumi/season_index.md"获取剧集排行榜"）：
+     * pgc/season/rank/list，仅需 season_type 参数，实测匿名可访问、无 WBI 签名要求。
+     *
+     * [seasonType]：番剧=1 电影=2 纪录片=3 国创=4 电视剧=5 综艺=7（六类实测均
+     * 有效，各返回 99~100 条）。条目为 season 级（无 aid/bvid/时长），经
+     * VideoModel.fromPgcSeasonJson 映射后由 sid/redirectUrl 派生剧集播放身份。
+     */
+    suspend fun pgcSeasonRank(seasonType: Int): List<VideoModel> {
+        val url = BiliClient.buildUrl(
+            path = "pgc/season/rank/list",
+            params = mapOf("season_type" to seasonType.toString())
+        )
+        val json = BiliClient.getJson(url)
+        BiliClient.checkResponse(json, "pgcSeasonRank")
+        val data = json.optJSONObject("data") ?: return emptyList()
+        val list = data.optJSONArray("list") ?: return emptyList()
+        return (0 until list.length()).mapNotNull { idx ->
+            runCatching { VideoModel.fromPgcSeasonJson(list.getJSONObject(idx)) }
+                .onFailure { AppLog.w(TAG, "pgcSeasonRank parse item failed: ${it.message}") }
+                .getOrNull()
+        }
+    }
+
     suspend fun related(aid: Long?, bvid: String?): List<VideoModel> {
         val params = mutableMapOf<String, String>()
         aid?.let { params["avid"] = it.toString() }

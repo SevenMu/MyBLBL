@@ -9,6 +9,7 @@ import com.myblbl.model.recommend.RecommendListDataModel
 import com.myblbl.model.video.VideoModel
 import com.myblbl.model.video.detail.VideoDetailModel
 import com.myblbl.network.response.BaseBaseResponse
+import com.myblbl.network.api.BiliApi
 import com.myblbl.network.session.NetworkSessionGateway
 import com.myblbl.repository.remote.VideoRepository as NetworkVideoRepository
 
@@ -39,6 +40,19 @@ class VideoRepository(
 
     suspend fun getRanking(rid: Int): BaseResponse<List<VideoModel>> {
         return delegate.getRanking(rid).getOrThrow()
+    }
+
+    /**
+     * PGC 板块剧集排行榜（纪录片/电影/电视剧/国创/番剧/综艺）：BiliApi 直连
+     * pgc/season/rank/list（文档接口无 WBI 要求），与 getRanking 共用同一仓库出口，
+     * runCatching 包装保证异常面与 delegate 转发方法一致。
+     */
+    suspend fun getPgcSeasonRank(seasonType: Int): BaseResponse<List<VideoModel>> {
+        return runCatching { BiliApi.pgcSeasonRank(seasonType) }
+            .fold(
+                onSuccess = { BaseResponse(code = 0, message = "success", data = it) },
+                onFailure = { BaseResponse(code = -1, message = it.message ?: "请求失败") }
+            )
     }
 
     suspend fun getVideoDetail(avid: Long?, bvid: String?): BaseResponse<VideoDetailModel> {

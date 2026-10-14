@@ -109,9 +109,14 @@ class CategoryFragment : BaseFragment<FragmentCategoryBinding>(), MainTabFocusTa
         categories.add(CategoryModel(1014, resources.getString(R.string.fashion)))
         categories.add(CategoryModel(1002, resources.getString(R.string.entainment)))
         categories.add(CategoryModel(1001, resources.getString(R.string.film_and_television)))
-        categories.add(CategoryModel(177, resources.getString(R.string.documentary)))
-        categories.add(CategoryModel(23, resources.getString(R.string.movie)))
-        categories.add(CategoryModel(11, resources.getString(R.string.series)))
+        // 纪录片/电影/电视剧/国创/番剧/综艺走剧集排行榜 pgc/season/rank/list（id 即 season_type），
+        // 其余分区仍走 x/web-interface/ranking/v2（rid）
+        categories.add(CategoryModel(3, resources.getString(R.string.documentary), isPgc = true))
+        categories.add(CategoryModel(2, resources.getString(R.string.movie), isPgc = true))
+        categories.add(CategoryModel(5, resources.getString(R.string.series), isPgc = true))
+        categories.add(CategoryModel(4, resources.getString(R.string.guochuang), isPgc = true))
+        categories.add(CategoryModel(1, resources.getString(R.string.animation), isPgc = true))
+        categories.add(CategoryModel(7, resources.getString(R.string.variety), isPgc = true))
 
         adapter.setCategories(categories)
         

@@ -253,21 +253,30 @@ data class VideoModel(
 
     private fun parseBangumiSeasonIdFromRedirectUrl(): Long {
         val url = redirectUrl
-        if (!url.contains("/bangumi/play/ss")) {
+        // 兼容两种形态：网页链接 /bangumi/play/ss28747 与深链 bilibili://bangumi/season/28747
+        // （历史记录 PGC 条目的 uri 即深链形态）
+        if (!url.contains("/bangumi/play/ss") && !url.contains("/bangumi/season/")) {
             return 0L
         }
-        val seasonId = url.substringAfter("/bangumi/play/ss", "")
-            .takeWhile { it.isDigit() }
+        val seasonId = (if (url.contains("/bangumi/play/ss")) {
+            url.substringAfter("/bangumi/play/ss", "")
+        } else {
+            url.substringAfter("/bangumi/season/", "")
+        }).takeWhile { it.isDigit() }
         return seasonId.toLongOrNull() ?: 0L
     }
 
     private fun parseBangumiEpIdFromRedirectUrl(): Long {
         val url = redirectUrl
-        if (!url.contains("/bangumi/play/ep")) {
+        // 兼容深链形态 bilibili://bangumi/ep/6707740（历史记录 PGC 条目）
+        if (!url.contains("/bangumi/play/ep") && !url.contains("/bangumi/ep/")) {
             return 0L
         }
-        val epId = url.substringAfter("/bangumi/play/ep", "")
-            .takeWhile { it.isDigit() }
+        val epId = (if (url.contains("/bangumi/play/ep")) {
+            url.substringAfter("/bangumi/play/ep", "")
+        } else {
+            url.substringAfter("/bangumi/ep/", "")
+        }).takeWhile { it.isDigit() }
         return epId.toLongOrNull() ?: 0L
     }
 
@@ -339,6 +348,28 @@ data class VideoModel(
                 is String -> value == "1" || value.equals("true", ignoreCase = true)
                 else -> false
             }
+        }
+
+        /**
+         * 剧集排行榜条目（pgc/season/rank/list 的 data.list 项，bilibili-API-collect
+         * docs/bangumi/season_index.md"获取剧集排行榜"章节）：season 级数据无 aid/bvid/时长，
+         * season_id/url 落入 sid/redirectUrl 后由 playbackSeasonId 派生 PGC 身份，
+         * 供剧集详情页跳转；new_ep.index_show（更新进度）落入 desc 备展示。
+         * badge（"大会员"/"出品"等角标）不映射 typeName——分类页卡片与其他板块
+         * 展示保持一致（纯标题，无附加角标文案）。
+         */
+        fun fromPgcSeasonJson(obj: JSONObject): VideoModel {
+            val statObj = obj.optJSONObject("stat")
+            val newEpObj = obj.optJSONObject("new_ep")
+            return VideoModel(
+                title = obj.optString("title", ""),
+                cover = obj.optString("cover", ""),
+                desc = newEpObj?.optString("index_show", "") ?: obj.optString("desc", ""),
+                sid = obj.optLong("season_id", 0),
+                seasonType = obj.optInt("season_type", 0),
+                redirectUrl = obj.optString("url", ""),
+                stat = statObj?.let { Stat.fromJson(it) }
+            )
         }
     }
 }

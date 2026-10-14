@@ -42,6 +42,7 @@ import com.myblbl.model.interaction.InteractionInfo
 import com.myblbl.model.interaction.InteractionModel
 import com.myblbl.model.search.SearchAllResponseData
 import com.myblbl.model.series.CheckUserSeriesResult
+import com.myblbl.model.series.EpPageResult
 import com.myblbl.model.series.EpisodesDetailModel
 import com.myblbl.model.series.FollowSeriesResult
 import com.myblbl.model.series.MyFollowingResponseWrapper
@@ -565,6 +566,14 @@ interface ApiService {
     suspend fun getVideoEpisodeSections(
         @Query("season_id") seasonId: Long
     ): Base2Response<SeasonSectionResult>
+
+    /** 剧集分页详情：按分区分页返回剧集条目（含 season/section 缺失的 bvid/cid 播放身份）。 */
+    @GET("pgc/view/web/ep/page")
+    suspend fun getEpPage(
+        @Query("season_id") seasonId: Long,
+        @Query("section_id") sectionId: Long,
+        @Query("page_index") pageIndex: Int = 0
+    ): Base2Response<EpPageResult>
 
     @GET("pgc/season/web/related/recommend")
     suspend fun getRelatedRecommend(

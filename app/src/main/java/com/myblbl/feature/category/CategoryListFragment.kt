@@ -9,7 +9,9 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import androidx.recyclerview.widget.RecyclerView
 import com.myblbl.model.video.VideoModel
+import com.myblbl.ui.adapter.PgcSeriesGridAdapter
 import com.myblbl.ui.adapter.VideoAdapter
+import com.myblbl.core.ui.base.BaseAdapter
 import com.myblbl.core.ui.base.BaseListFragment
 import com.myblbl.core.ui.base.adaptiveSpanCount
 import com.myblbl.core.common.content.ContentFilter
@@ -25,13 +27,15 @@ class CategoryListFragment : BaseListFragment<VideoModel>(), com.myblbl.ui.activ
         private const val TAG = "CategoryFocus"
         private const val ARG_CATEGORY_ID = "category_id"
         private const val ARG_CATEGORY_NAME = "category_name"
+        private const val ARG_IS_PGC = "is_pgc"
         private const val CACHE_TTL_MS = 20 * 60 * 1000L
 
-        fun newInstance(categoryId: Int, categoryName: String): CategoryListFragment {
+        fun newInstance(categoryId: Int, categoryName: String, isPgc: Boolean = false): CategoryListFragment {
             val fragment = CategoryListFragment()
             val args = Bundle()
             args.putInt(ARG_CATEGORY_ID, categoryId)
             args.putString(ARG_CATEGORY_NAME, categoryName)
+            args.putBoolean(ARG_IS_PGC, isPgc)
             fragment.arguments = args
             return fragment
         }
@@ -39,6 +43,7 @@ class CategoryListFragment : BaseListFragment<VideoModel>(), com.myblbl.ui.activ
 
     private val viewModel: CategoryViewModel by viewModel()
     private var categoryId: Int = 0
+    private var isPgc: Boolean = false
     override val deferSwipeRefreshUntilFirstDraw: Boolean = true
     override val autoLoad: Boolean = false
     override val enableLoadMoreFocusController: Boolean = false
@@ -47,28 +52,52 @@ class CategoryListFragment : BaseListFragment<VideoModel>(), com.myblbl.ui.activ
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         categoryId = arguments?.getInt(ARG_CATEGORY_ID) ?: 0
+        isPgc = arguments?.getBoolean(ARG_IS_PGC, false) ?: false
     }
 
-    override fun createAdapter(): VideoAdapter {
-        return VideoAdapter(
-            onItemClick = ::onVideoClick,
-            onTopEdgeUp = ::focusTopTab,
-            onLeftEdge = ::switchToPrevCategoryTab,
-            onRightEdge = ::switchToNextCategoryTab,
-            onBottomEdgeDown = ::keepCurrentFocus,
-            onItemFocusedWithView = { view, position ->
-                tvFocusController?.onItemFocused(view, position)
-            },
-            onItemDpad = { view, keyCode, event ->
-                tvFocusController?.handleKey(view, keyCode, event) == true
-            },
-            onItemsChanged = {
-                notifyTvListDataChanged(TvDataChangeReason.REMOVE_ITEM)
-            }
-        )
+    override fun createAdapter(): BaseAdapter<VideoModel, *> {
+        // PGC 板块用首页番剧栏同款剧集海报卡（cell_series：3:4 封面+标题+更新进度），
+        // 其他分区保持通用视频卡（VideoAdapter）
+        return if (isPgc) {
+            PgcSeriesGridAdapter(
+                onItemClick = ::onVideoClick,
+                onTopEdgeUp = ::focusTopTab,
+                onLeftEdge = ::switchToPrevCategoryTab,
+                onRightEdge = ::switchToNextCategoryTab,
+                onBottomEdgeDown = ::keepCurrentFocus,
+                onItemFocusedWithView = { view, position ->
+                    tvFocusController?.onItemFocused(view, position)
+                },
+                onItemDpad = { view, keyCode, event ->
+                    tvFocusController?.handleKey(view, keyCode, event) == true
+                },
+                onItemsChanged = {
+                    notifyTvListDataChanged(TvDataChangeReason.REMOVE_ITEM)
+                }
+            )
+        } else {
+            VideoAdapter(
+                onItemClick = ::onVideoClick,
+                onTopEdgeUp = ::focusTopTab,
+                onLeftEdge = ::switchToPrevCategoryTab,
+                onRightEdge = ::switchToNextCategoryTab,
+                onBottomEdgeDown = ::keepCurrentFocus,
+                onItemFocusedWithView = { view, position ->
+                    tvFocusController?.onItemFocused(view, position)
+                },
+                onItemDpad = { view, keyCode, event ->
+                    tvFocusController?.handleKey(view, keyCode, event) == true
+                },
+                onItemsChanged = {
+                    notifyTvListDataChanged(TvDataChangeReason.REMOVE_ITEM)
+                }
+            )
+        }
     }
 
-    override fun getSpanCount(): Int = resources.adaptiveSpanCount()
+    // 剧集海报卡 3:4 竖版比视频卡窄，列数更密（对齐首页番剧栏 屏宽1/7 的卡宽观感）
+    override fun getSpanCount(): Int =
+        if (isPgc) resources.adaptiveSpanCount(base = 7, wide = 9) else resources.adaptiveSpanCount()
 
     override fun loadData(page: Int) {
         if (viewModel.loading.value) {
@@ -78,7 +107,7 @@ class CategoryListFragment : BaseListFragment<VideoModel>(), com.myblbl.ui.activ
         isLoading = true
         showLoading(true)
         viewModel.clearError()
-        viewModel.loadCategoryVideos(categoryId, forceRefresh = true)
+        viewModel.loadCategoryVideos(categoryId, isPgc, forceRefresh = true)
     }
 
     override fun checkLoadMore() {
@@ -144,7 +173,7 @@ class CategoryListFragment : BaseListFragment<VideoModel>(), com.myblbl.ui.activ
                     val videos = ContentFilter.filterVideos(requireContext(), rawVideos)
                     isLoading = false
                     setRefreshing(false)
-                    val currentItemCount = (adapter as? VideoAdapter)?.items?.size ?: 0
+                    val currentItemCount = adapter?.contentCount() ?: 0
                     if (currentItemCount == videos.size && currentItemCount > 0) {
                         return@collectLatest
                     }
@@ -195,6 +224,13 @@ class CategoryListFragment : BaseListFragment<VideoModel>(), com.myblbl.ui.activ
     }
 
     private fun onVideoClick(video: VideoModel) {
+        // PGC 条目（season 级）进剧集详情页选集，与首页番剧/影视 lane 行为一致
+        if (video.isPgc && video.playbackSeasonId > 0L) {
+            openInHostContainer(
+                com.myblbl.feature.series.SeriesDetailFragment.newInstance(video.playbackSeasonId)
+            )
+            return
+        }
         VideoRouteNavigator.openVideo(
             context = requireContext(),
             video = video,
@@ -213,7 +249,7 @@ class CategoryListFragment : BaseListFragment<VideoModel>(), com.myblbl.ui.activ
         if (!isAdded || view == null || viewModel.loading.value || isLoading) {
             return
         }
-        if (adapter?.itemCount == 0 || viewModel.isCacheStale(categoryId, CACHE_TTL_MS)) {
+        if (adapter?.itemCount == 0 || viewModel.isCacheStale(categoryId, isPgc, CACHE_TTL_MS)) {
             loadData(1)
         }
     }
@@ -286,5 +322,4 @@ class CategoryListFragment : BaseListFragment<VideoModel>(), com.myblbl.ui.activ
 
     override fun onVideoBlocked(aid: Long, bvid: String) {
         (adapter as? VideoAdapter)?.removeByVideoId(aid, bvid)
-    }
-}
+    }}
