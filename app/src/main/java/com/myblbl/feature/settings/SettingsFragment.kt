@@ -55,6 +55,9 @@ import com.myblbl.feature.player.view.MyPlayerSettingView
 import com.myblbl.core.common.ext.normalizeDanmakuSmartFilterValue
 import com.myblbl.core.common.ext.localizedSettingLabel
 import com.myblbl.network.cookie.CookieManager
+import com.myblbl.event.AppEventHub
+import com.myblbl.feature.home.HomeRegionCatalog
+import com.myblbl.ui.adapter.RegionMultiChoiceAdapter
 import com.myblbl.ui.activity.MainActivity
 import com.myblbl.ui.activity.GaiaVgateActivity
 import com.myblbl.ui.widget.NonFocusableScrollView
@@ -134,6 +137,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
         private const val KEY_GAIA_VGATE_V_VOUCHER_SAVED_AT_MS = "gaia_vgate_v_voucher_saved_at_ms"
         private const val KEY_IPV4_ONLY = "ipv4_only"
         private const val KEY_DOUYIN_MODE = "douyin_mode"
+        private const val KEY_HOME_REGIONS = HomeRegionCatalog.PREF_KEY_REGION_TABS
         private const val KEY_RESUME_PLAYBACK = "resume_playback"
         private const val KEY_SPONSOR_BLOCK_ENABLED = "sponsor_block_enabled"
         private const val KEY_AUDIO_NORMALIZE_LEGACY = "audio_normalize"
@@ -188,6 +192,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
     private lateinit var aboutGroups: List<SettingGroup>
     private val appSettings: AppSettingsDataStore by inject()
     private val cookieManager: CookieManager by inject()
+    private val appEventHub: AppEventHub by inject()
 
     private val updateScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val updateCheckState = MutableStateFlow<UpdateCheckState>(UpdateCheckState.Idle)
@@ -262,9 +267,10 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
                 stored(KEY_DEFAULT_START_PAGE, R.string.default_start_page, "热门"),
                 stored(KEY_LIVE_ENTRY, R.string.live_entry, "关"),
                 stored(KEY_CCTV_LIVE_ENTRY, R.string.cctv_live, "关"),
-                stored(KEY_SHOW_VIDEO_DETAIL, R.string.show_video_detail_page, "关"),
+                stored(KEY_SHOW_VIDEO_DETAIL, R.string.show_video_detail_page, "开"),
                 stored(KEY_DOUYIN_MODE, R.string.douyin_mode, "关"),
-                stored(KEY_GIVE_COIN_NUMBER, R.string.give_coin_number, "2")
+                stored(KEY_GIVE_COIN_NUMBER, R.string.give_coin_number, "2"),
+                plain(KEY_HOME_REGIONS, R.string.setting_home_regions, HomeRegionCatalog.selectedCountText(appSettings))
             )),
             SettingGroup(R.string.setting_group_network, listOf(
                 stored(KEY_IPV4_ONLY, R.string.ipv4_only, "开"),
@@ -597,6 +603,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
             KEY_SHOW_VIDEO_DETAIL -> toggle(key)
             KEY_DOUYIN_MODE -> toggle(key)
             KEY_GIVE_COIN_NUMBER -> showCommonChoiceDialog(key, arrayOf("1", "2"))
+            KEY_HOME_REGIONS -> showHomeRegionsDialog()
             // —— 通用·网络与账号 ——
             KEY_IPV4_ONLY -> toggle(key)
             KEY_RISK_CONTROL -> showRiskControlDialog()
@@ -1755,6 +1762,71 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
             .translationX(0f)
             .setDuration(150L)
             .start()
+    }
+
+    /**
+     * 首页板块管理：多选弹窗（点击即勾选/取消，立即写入存储并广播
+     * HomeRegionsChanged；首页仍被勾选的分区页原地保留，被取消的即从 tab 栏移除）。
+     */
+    private fun showHomeRegionsDialog() {
+        val dialog = AppCompatDialog(requireContext(), R.style.DialogTheme)
+        dialog.setCanceledOnTouchOutside(true)
+        DialogWindowFit.overlay(
+            dialog,
+            layoutInflater.inflate(R.layout.dialog_setting_choice, null),
+            resources.getDimensionPixelSize(R.dimen.px800),
+            heightPx = resources.getDimensionPixelSize(R.dimen.px615),
+            tag = "homeRegionsChoice"
+        )
+        dialog.findViewById<View>(R.id.dialog_root)?.setOnClickListener { dialog.dismiss() }
+
+        val titleView = dialog.findViewById<TextView>(R.id.top_title)
+        val recyclerView = dialog.findViewById<RecyclerView>(R.id.recyclerView)
+        titleView?.text = getString(R.string.setting_home_regions)
+
+        val catalog = HomeRegionCatalog.entries
+        val rids = catalog.map { it.rid }
+        val names = catalog.map { getString(it.titleRes) }
+        val selectedRids = HomeRegionCatalog.loadSelectedRids(appSettings).toMutableSet()
+
+        val choiceAdapter = RegionMultiChoiceAdapter(
+            rids = rids,
+            names = names,
+            selectedRids = selectedRids
+        ) { rid, checked ->
+            if (checked) {
+                selectedRids.add(rid)
+            } else {
+                selectedRids.remove(rid)
+            }
+            appSettings.putStringSetAsync(
+                HomeRegionCatalog.PREF_KEY_REGION_TABS,
+                selectedRids.map(Int::toString).toSet()
+            )
+            appEventHub.dispatch(AppEventHub.Event.HomeRegionsChanged)
+            updateInfo(KEY_HOME_REGIONS, "${selectedRids.size}/${rids.size}")
+        }
+
+        val dialogLayoutManager = createExtraSpaceLayoutManager(
+            resources.getDimensionPixelSize(R.dimen.px100)
+        )
+        recyclerView?.layoutManager = dialogLayoutManager
+        recyclerView?.adapter = choiceAdapter
+        if (recyclerView != null && recyclerView.itemDecorationCount == 0) {
+            recyclerView.addItemDecoration(
+                LinearSpacingItemDecoration(
+                    resources.getDimensionPixelSize(R.dimen.px2),
+                    includeBottom = true
+                )
+            )
+        }
+
+        dialog.setOnShowListener {
+            recyclerView?.post {
+                choiceAdapter.requestInitialFocus(recyclerView)
+            }
+        }
+        dialog.show()
     }
 
     private fun updateSettingsList(rows: List<SettingRow>, animate: Boolean) {

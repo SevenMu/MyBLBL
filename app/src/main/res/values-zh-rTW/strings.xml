@@ -417,4 +417,26 @@
     <string name="konami_hint">使用遙控器方向鍵輸入魂斗羅密技才能關閉！</string>
     <string name="sponsor_testing">正在測試…</string>
     <string name="confirm_save">儲存</string>
+    <!-- ==================== 首頁分區板塊（region/feed/rcmd 動態 tab） ==================== -->
+    <string name="technology">科技</string>
+    <string name="information">資訊</string>
+    <string name="short_play">小劇場</string>
+    <string name="fashion_beauty">時尚美妝</string>
+    <string name="sports">體育運動</string>
+    <string name="animal">動物</string>
+    <string name="vlog">vlog</string>
+    <string name="painting">繪畫</string>
+    <string name="artificial_intelligence">人工智能</string>
+    <string name="home_decor">家裝房產</string>
+    <string name="outdoors">戶外潮流</string>
+    <string name="fitness">健身</string>
+    <string name="handcraft">手工</string>
+    <string name="travel">旅遊出行</string>
+    <string name="rural">三農</string>
+    <string name="parenting">親子</string>
+    <string name="health">健康</string>
+    <string name="emotion">情感</string>
+    <string name="life_interest">生活興趣</string>
+    <string name="life_experience">生活經驗</string>
+    <string name="setting_home_regions">首頁板塊管理</string>
 </resources>

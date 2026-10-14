@@ -32,6 +32,7 @@ import com.myblbl.feature.home.HomeLaneViewModel
 import com.myblbl.feature.home.RecommendDislikeFeedback
 import com.myblbl.feature.home.RecommendFeedRepository
 import com.myblbl.feature.home.RecommendViewModel
+import com.myblbl.feature.home.RegionFeedViewModel
 import com.myblbl.feature.live.LiveListViewModel
 import com.myblbl.feature.live.LiveRecommendViewModel
 import com.myblbl.feature.live.LiveViewModel
@@ -97,6 +98,7 @@ val viewModelModule = module {
     viewModel { RecommendViewModel(get(), get(), androidContext()) }
     viewModel { HotViewModel(get(), get(), androidContext()) }
     viewModel { (type: Int) -> HomeLaneViewModel(type, get()) }
+    viewModel { (rid: Int) -> RegionFeedViewModel(rid, get(), androidContext()) }
     viewModel { MainNavigationViewModel(get()) }
     viewModel { VideoPlayerViewModel(get(), get(), get(), get(), get(), get(), get(named("noCookie")), get(), androidContext(), get()) }
     viewModel { CategoryViewModel(get()) }

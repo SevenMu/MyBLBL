@@ -274,7 +274,8 @@ data class VideoModel(
     companion object {
         fun fromJson(obj: JSONObject): VideoModel {
             val statObj = obj.optJSONObject("stat")
-            val ownerObj = obj.optJSONObject("owner")
+            // region/feed/rcmd 等分区接口的 UP 主字段名为 author（mid/name，无 face），与 owner 同义
+            val ownerObj = obj.optJSONObject("owner") ?: obj.optJSONObject("author")
             val bangumiObj = obj.optJSONObject("bangumi")
             val dimensionObj = obj.optJSONObject("dimension")
             val rightsObj = obj.optJSONObject("rights")

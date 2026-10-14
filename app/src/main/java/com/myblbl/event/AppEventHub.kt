@@ -32,6 +32,9 @@ class AppEventHub {
             val aid: Long,
             val bvid: String
         ) : Event
+
+        /** 设置-通用-首页板块管理：勾选展示的分区板块集合发生变化。 */
+        data object HomeRegionsChanged : Event
     }
 
     private val _events = MutableSharedFlow<Event>(extraBufferCapacity = 64)

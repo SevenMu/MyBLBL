@@ -417,4 +417,26 @@
     <string name="konami_hint">Enter the Konami code with the remote D-pad to turn it off!</string>
     <string name="sponsor_testing">Testing…</string>
     <string name="confirm_save">Save</string>
+    <!-- ==================== Home region tabs (region/feed/rcmd dynamic tabs) ==================== -->
+    <string name="technology">Technology</string>
+    <string name="information">News</string>
+    <string name="short_play">Short Play</string>
+    <string name="fashion_beauty">Fashion &amp; Beauty</string>
+    <string name="sports">Sports</string>
+    <string name="animal">Animals</string>
+    <string name="vlog">Vlog</string>
+    <string name="painting">Painting</string>
+    <string name="artificial_intelligence">AI</string>
+    <string name="home_decor">Home &amp; Living</string>
+    <string name="outdoors">Outdoors</string>
+    <string name="fitness">Fitness</string>
+    <string name="handcraft">Handcraft</string>
+    <string name="travel">Travel</string>
+    <string name="rural">Rural Life</string>
+    <string name="parenting">Parenting</string>
+    <string name="health">Health</string>
+    <string name="emotion">Emotions</string>
+    <string name="life_interest">Life Hobbies</string>
+    <string name="life_experience">Life Tips</string>
+    <string name="setting_home_regions">Home tabs</string>
 </resources>

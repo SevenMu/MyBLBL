@@ -13,12 +13,17 @@ object BiliApi {
 
     private const val TAG = "BiliApi"
 
+    /** region/feed/rcmd：内容池暂时没有更多内容。 */
+    private const val REGION_FEED_NO_MORE_CODE = 62013
+
+    /** region/feed/rcmd：每屏请求条数（与网页版一致）。 */
+    private const val REGION_FEED_REQUEST_CNT = 15
+
     data class RecommendPageResult(
         val items: List<VideoModel>,
         val rawCount: Int,
         val source: String
     )
-
     suspend fun recommendV8(freshIdx: Int, ps: Int, fetchRow: Int): RecommendPageResult {
         val t0 = SystemClock.elapsedRealtime()
         if (NetworkManager.areWbiKeysStale()) {
@@ -142,6 +147,47 @@ object BiliApi {
         return (0 until list.length()).mapNotNull { idx ->
             runCatching { VideoModel.fromJson(list.getJSONObject(idx)) }
                 .onFailure { AppLog.w(TAG, "ranking parse item failed: ${it.message}") }
+                .getOrNull()
+        }
+    }
+
+    /**
+     * 分区 feed 推荐流（网页版分区页同款 x/web-interface/region/feed/rcmd，带 WBI 签名）。
+     *
+     * [fromRegion] 即分区 cid（与分类页 rid 同值）；[displayId] 递增翻页，
+     * 每屏返回 requestCnt 条且无重复；62013 = 内容池暂时没有更多（返回空列表而非报错）。
+     * 响应 data.archives 中 UP 主字段为 author（owner 的同义别名），VideoModel.fromJson 已兼容。
+     *
+     * WBI keys 尚未拉取时 signedWbiUrl 自动退化为无签名请求（该接口裸请求亦可用），
+     * 签名与 dm_* 反爬参数仅用于对齐网页端行为、降低风控概率。
+     */
+    suspend fun regionFeedRcmd(
+        fromRegion: Int,
+        displayId: Int,
+        requestCnt: Int = REGION_FEED_REQUEST_CNT
+    ): List<VideoModel> {
+        val url = BiliClient.signedWbiUrl(
+            path = "x/web-interface/region/feed/rcmd",
+            params = mapOf(
+                "display_id" to displayId.coerceAtLeast(1).toString(),
+                "request_cnt" to requestCnt.toString(),
+                "from_region" to fromRegion.toString(),
+                "device" to "web",
+                "plat" to "30",
+                "web_location" to "333.40138"
+            )
+        )
+        val json = BiliClient.getJson(url)
+        if (json.optInt("code", -1) == REGION_FEED_NO_MORE_CODE) {
+            AppLog.i(TAG, "regionFeedRcmd no more content fromRegion=$fromRegion displayId=$displayId")
+            return emptyList()
+        }
+        BiliClient.checkResponse(json, "regionFeedRcmd")
+        val data = json.optJSONObject("data") ?: return emptyList()
+        val list = data.optJSONArray("archives") ?: return emptyList()
+        return (0 until list.length()).mapNotNull { idx ->
+            runCatching { VideoModel.fromJson(list.getJSONObject(idx)) }
+                .onFailure { AppLog.w(TAG, "regionFeedRcmd parse item failed: ${it.message}") }
                 .getOrNull()
         }
     }

@@ -555,4 +555,26 @@
     <string name="konami_hint">使用遥控器方向键输入魂斗罗秘籍才能关闭！</string>
     <string name="sponsor_testing">正在测试…</string>
     <string name="confirm_save">保存</string>
+    <!-- ==================== 首页分区板块（region/feed/rcmd 动态 tab） ==================== -->
+    <string name="technology">科技</string>
+    <string name="information">资讯</string>
+    <string name="short_play">小剧场</string>
+    <string name="fashion_beauty">时尚美妆</string>
+    <string name="sports">体育运动</string>
+    <string name="animal">动物</string>
+    <string name="vlog">vlog</string>
+    <string name="painting">绘画</string>
+    <string name="artificial_intelligence">人工智能</string>
+    <string name="home_decor">家装房产</string>
+    <string name="outdoors">户外潮流</string>
+    <string name="fitness">健身</string>
+    <string name="handcraft">手工</string>
+    <string name="travel">旅游出行</string>
+    <string name="rural">三农</string>
+    <string name="parenting">亲子</string>
+    <string name="health">健康</string>
+    <string name="emotion">情感</string>
+    <string name="life_interest">生活兴趣</string>
+    <string name="life_experience">生活经验</string>
+    <string name="setting_home_regions">首页板块管理</string>
 </resources>

@@ -26,9 +26,12 @@ import com.myblbl.core.ui.tab.disableAdjacentPagePrefetch
 import com.myblbl.core.ui.tab.retainAllPagesAfterFirstLayout
 import com.myblbl.core.ui.focus.SpatialFocusNavigator
 import com.myblbl.core.common.ext.getHomeDefaultStartPageIndex
+import com.myblbl.core.common.settings.AppSettingsDataStore
+import com.myblbl.event.AppEventHub
 import com.myblbl.core.common.log.AppLog
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import org.koin.android.ext.android.inject
 
 class HomeFragment : Fragment(), MainTabFocusTarget, OnBackPressedHandler {
 
@@ -41,6 +44,8 @@ class HomeFragment : Fragment(), MainTabFocusTarget, OnBackPressedHandler {
     private var _binding: FragmentHomeBinding? = null
     private val binding get() = _binding!!
     private val mainNavigationViewModel: MainNavigationViewModel by activityViewModels()
+    private val appSettings: AppSettingsDataStore by inject()
+    private val appEventHub: AppEventHub by inject()
     private lateinit var adapter: HomeFragmentStateAdapter
     private var tabMediator: TabLayoutMediator? = null
     private var pageChangeCallback: ViewPager2.OnPageChangeCallback? = null
@@ -62,9 +67,13 @@ class HomeFragment : Fragment(), MainTabFocusTarget, OnBackPressedHandler {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         val t0 = SystemClock.elapsedRealtime()
         super.onViewCreated(view, savedInstanceState)
-        adapter = HomeFragmentStateAdapter(childFragmentManager, viewLifecycleOwner.lifecycle)
+        adapter = HomeFragmentStateAdapter(
+            fragmentManager = childFragmentManager,
+            lifecycle = viewLifecycleOwner.lifecycle,
+            regionRids = HomeRegionCatalog.loadSelectedRids(appSettings)
+        )
         binding.viewPager.adapter = adapter
-        // 冷启动先按需创建（只建当前页，不拖慢首帧），首帧后再保留全部 4 个 tab 页：
+        // 冷启动先按需创建（只建当前页，不拖慢首帧），首帧后再保留全部 tab 页：
         // 此后切 tab 不销毁 fragment，滚动进度/焦点/已加载数据切回来原样保留
         // （配合各 tab 页"非当前页不加载"的懒加载，空壳成本极低）
         binding.viewPager.disableAdjacentPagePrefetch()
@@ -118,20 +127,20 @@ class HomeFragment : Fragment(), MainTabFocusTarget, OnBackPressedHandler {
             }
         }
 
+        // "首页板块管理"勾选变化：即时重排 tab（设置页是 overlay，本页仍 STARTED 可实时收到；
+        // 另在 onResume 幂等兜底，防止事件被错过）
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                appEventHub.events.collectLatest { event ->
+                    if (event is AppEventHub.Event.HomeRegionsChanged) {
+                        applyRegionTabsIfNeeded()
+                    }
+                }
+            }
+        }
+
         binding.viewPager.currentItem = getDefaultTabIndex()
         AppLog.i("STARTUP", "HomeFragment.onViewCreated elapsed=${SystemClock.elapsedRealtime() - t0}ms")
-    }
-
-    override fun onDestroyView() {
-        pageChangeCallback?.let { binding.viewPager.unregisterOnPageChangeCallback(it) }
-        pageChangeCallback = null
-        tabSelectedListener?.let { binding.tabLayout.removeOnTabSelectedListener(it) }
-        tabSelectedListener = null
-        tabMediator?.detach()
-        tabMediator = null
-        binding.viewPager.adapter = null
-        super.onDestroyView()
-        _binding = null
     }
 
     private fun getDefaultTabIndex(): Int {
@@ -139,6 +148,45 @@ class HomeFragment : Fragment(), MainTabFocusTarget, OnBackPressedHandler {
             maxIndex = adapter.itemCount - 1,
             defaultIndex = 0
         )
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // 兜底：SharedFlow 无 replay，若"首页板块管理"事件在本页非 STARTED 时发出会错过，
+        // 这里幂等比对一次勾选集合（无变化时 zero-cost）。
+        applyRegionTabsIfNeeded()
+    }
+
+    /**
+     * 按设置重排分区板块 tab（幂等）：
+     * 仍被勾选的分区页因 itemId 稳定被 ViewPager 复用（滚动进度/已加载内容保留），
+     * 重排后尽量停留回当前正在看的页（被取消勾选的分区页回落到"推荐"）。
+     */
+    private fun applyRegionTabsIfNeeded() {
+        val currentBinding = _binding ?: return
+        if (!this::adapter.isInitialized) return
+        val newRids = HomeRegionCatalog.loadSelectedRids(appSettings)
+        val currentPageIdentity = adapter.pageIdentityAt(currentBinding.viewPager.currentItem)
+        if (!adapter.updateRegions(newRids)) {
+            return
+        }
+        // 页数可能增加：首帧后保留全部页的 offscreenPageLimit 需跟随新页数，
+        // 否则超出旧 limit 的分区页会被销毁重建（ViewModel 与滚动进度丢失）。
+        val pageCount = adapter.itemCount
+        currentBinding.viewPager.offscreenPageLimit =
+            if (pageCount > 1) pageCount - 1 else ViewPager2.OFFSCREEN_PAGE_LIMIT_DEFAULT
+        val targetPosition = adapter.positionOfIdentity(currentPageIdentity)
+        currentBinding.viewPager.setCurrentItem(
+            if (targetPosition >= 0) targetPosition else 0,
+            false
+        )
+        AppLog.i("HomeRegions", "region tabs updated size=${newRids.size} resume=$currentPageIdentity->$targetPosition")
+    }
+
+    /** 分区页位置查询：动态 tab 下 RegionFeedFragment 向宿主反查自身 tab 序号。 */
+    fun positionOfRegionPage(rid: Int): Int {
+        if (!this::adapter.isInitialized) return -1
+        return adapter.positionOfRegion(rid)
     }
 
 

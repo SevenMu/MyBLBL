@@ -167,6 +167,15 @@ class CategoryListFragment : BaseListFragment<VideoModel>(), com.myblbl.ui.activ
                         showContent()
                         showLoading(true)
                     }
+                    if (!loading) {
+                        // 兜底复位：排行榜短时间内内容不变时，videos StateFlow 因 equals
+                        // 相同不再发射，只依赖 videos collector 的收圈/复位逻辑全部失联，
+                        // 会出现下拉刷新后转圈永远不消失、isLoading 卡死。加载结束信号
+                        // （loading true→false 必发射）统一在这里收尾。
+                        isLoading = false
+                        setRefreshing(false)
+                        showLoading(false)
+                    }
                 }
             }
         }
