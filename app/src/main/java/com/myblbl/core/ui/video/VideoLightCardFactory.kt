@@ -23,6 +23,8 @@ import android.widget.ImageView
 import androidx.core.content.ContextCompat
 import com.myblbl.R
 import com.myblbl.core.common.log.VideoCardPerfLogger
+import com.myblbl.core.common.log.AppLog
+import com.myblbl.core.ui.base.UiScale
 import com.myblbl.core.ui.base.UiTextScale
 import pl.droidsonroids.gif.GifDrawable
 import kotlin.math.ceil
@@ -430,10 +432,10 @@ class VideoCardTextLayerView @JvmOverloads constructor(
     attrs: AttributeSet? = null
 ) : View(context, attrs) {
 
-    private val metrics = LightCardMetrics.get(context)
+    private var metrics = LightCardMetrics.get(context)
     private val defaultTitleColor = ContextCompat.getColor(context, R.color.textColor)
     private val ownerTextColor = ContextCompat.getColor(context, R.color.subTextColor)
-    private val assets = TextLayerAssets.get(context, metrics, ownerTextColor)
+    private var assets = TextLayerAssets.get(context, metrics, ownerTextColor)
     private val titlePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         color = defaultTitleColor
         textSize = metrics.titleTextSize
@@ -504,6 +506,37 @@ class VideoCardTextLayerView @JvmOverloads constructor(
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         updatePlayingAnimation()
+        selfHealMetricsIfDrifted()
+    }
+
+    /**
+     * 密度自愈：系统在无重建路径的 config 变化上会用物理 DPI 重置已运行 Resources 的
+     * density（日志"density reset by system"1.75→1.0），RecyclerView 缓存中的旧卡片
+     * View 不重建、TextPaint 里钉的就是重置后放大的字号——列表回到屏幕后大字定格
+     * （attach 窗口期 LightCardMetrics 可能按异常密度建出 1.75 倍字号的实例）。
+     * attach 时机校验当前字号与最新 metrics 实例的设计值，不一致则换实例、重设 Paint、
+     * 清字号缓存并 requestLayout，旧卡片在滑回可见时自愈到正确字号。
+     */
+    private fun selfHealMetricsIfDrifted() {
+        val latest = LightCardMetrics.get(context)
+        if (latest !== metrics &&
+            (latest.titleTextSize != titlePaint.textSize ||
+                latest.ownerTextSize != ownerPaint.textSize ||
+                latest.badgeTextSize != badgeTextPaint.textSize)
+        ) {
+            AppLog.w(
+                "LightCard",
+                "textLayer density self-heal: title=${titlePaint.textSize}->${latest.titleTextSize}"
+            )
+            metrics = latest
+            assets = TextLayerAssets.get(context, latest, ownerTextColor)
+            titlePaint.textSize = latest.titleTextSize
+            ownerPaint.textSize = latest.ownerTextSize
+            badgeTextPaint.textSize = latest.badgeTextSize
+            clearTitleCache()
+            requestLayout()
+            invalidate()
+        }
     }
 
     override fun onDetachedFromWindow() {
@@ -1030,14 +1063,23 @@ private class LightCardMetrics private constructor(context: Context) {
         private val cache = java.util.WeakHashMap<android.content.res.Resources, LightCardMetrics>()
 
         fun get(context: Context): LightCardMetrics {
-            val resources = context.resources
+            // 布局参数从 application resources 读取；读取前先 ensureApplied 把被系统
+            // 重置污染的密度钉回设计值——系统会在运行中（日志"density reset by system"
+            // 1.75→1.0，打开详情页/新 Activity attach 时）按物理 DPI 重置 app 级
+            // Resources 的密度，若不先钉回，刷新/新建卡片的窗口期会缓存出 1.75 倍
+            // 字号的 metrics 实例（title=54.25 而非 31），并被自愈逻辑当作"最新正确
+            // 值"传染给正常卡片（实测日志 self-heal 31.0->54.25 方向反转）。
+            // 先钉再读保证任何时刻新建的实例都基于设计密度，缓存快照天然一致。
+            val appContext = context.applicationContext ?: context
+            UiScale.ensureApplied(appContext.resources)
+            val resources = appContext.resources
             val scale = UiTextScale.scale()
             val density = resources.displayMetrics.density
             synchronized(cache) {
                 // Resources 实例在 Activity recreate 后可能复用，档位/密度变化时按快照失效重建
                 cache[resources]?.takeIf { it.scaleSnapshot == scale && it.densitySnapshot == density }
                     ?: cache.remove(resources)
-                return cache.getOrPut(resources) { LightCardMetrics(context.applicationContext ?: context) }
+                return cache.getOrPut(resources) { LightCardMetrics(appContext) }
             }
         }
     }

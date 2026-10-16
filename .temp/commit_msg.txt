@@ -1,0 +1,44 @@
+feat(userspace): UP主页/弹窗全局排序+合集tab——同步上游v2.1.6，根治列表字号变大
+
+含两批工作：上游 MyTVB(qianxuntudou-ops) v2.1.6 更新融合移植 + 本地两项修复。
+fork点81395d6a→e5b3b69b共6个代码提交，核验10条更新中7条已存在于本地；
+cherry-pick因全项目包名重命名不可用，采用净diff手工移植+未改文件直接取上游版，
+UserSpaceFragment经字节级比对确认仅包名差异后整体替换。
+
+一、上游 v2.1.6 融合移植
+1. UP主弹窗全局排序(OwnerDetailDialog+SpaceVideoOrder新增)
+   - 关注左侧新增排序按钮(白描边胶囊)，一次选择控制所有tab：
+     最新发布/最多播放/最多收藏/最早发布
+   - 视频走服务端order(pubdate/click/stow，getUserDynamic接口补order透传)；
+     合集系列最多播放客户端拉全按stat.view降序；最早发布投稿接口无正序→
+     探总数跳末页倒翻+页内反转呈现老→新
+   - 空tab新增「啥都没有」提示；修三弹窗(OwnerDetail/PlayerAction/UserInfo)
+     点卡片内空白误关
+2. 全屏UP主页同款合集tab+全局排序(UserSpaceFragment/UserSpaceHeaderAdapter)
+   - 视频/直播回放/系列/合集独立TabState，数据/滚动位置各自保持
+   - 关注粉丝统计挪头部行右端；排序按钮挪投稿行左端、投稿数:N右对齐
+   - getSeriesArchives/getSeasonArchives补sortDesc(修sort_reverse接反)
+3. 焦点基建：enableDirectTabNavigation立即+post双装消addTab窗口期，
+   新增onEdgeLeft/Right边界回调；TvListFocusController锚点恢复不抢
+   RV非焦点header区
+4. 修复：关注页首进焦点被视频卡片抢走(DynamicFragment删功能栏放行例外)；
+   CCTV直播返回按钮单击无反应(恢复直接退出)；UP弹窗tab上键落点改排序按钮
+5. 直播SC卡片视觉微调：用户名改B站粉#FB7299不描边；头像px56→px72
+
+二、本地修复(基于用户日志myblbl_log_20261016三份分析)
+1. 修复UGC详情页点播放无法进播放器：PGC分流条件漏了forcePlayer门控，
+   详情页内选集/继续观看(forcePlayer=true)被重定向回剧集详情页形成循环
+   (日志trace-18点正片三次openVideo pgc season无播放实证)——补!forcePlayer
+2. 根治首页列表卡片文字突然变大(两轮迭代):
+   - 系统在运行中会按物理DPI重置已运行Resources密度(日志density reset
+     by system 1.75→1.0，开详情页/新Activity attach时触发)
+   - 第一轮LightCardMetrics缓存键改app resources+卡片attach自愈，但日志
+     self-heal title=31.0->54.25实证app resources同样被污染、自愈被反向
+     传染(刷新瞬间get到坏密度实例当最新值)
+   - 第二轮根治：LightCardMetrics.get读参前先ensureApplied把污染密度钉回
+     设计值——任何时刻新建实例必基于正确密度；自愈机制保留治历史坏卡片
+     (实测12张卡片31→54.25自愈方向随实例修正)
+
+已验证：compileDebugKotlin+assembleDebug通过，逐轮装MuMu实测(播放循环/
+自愈方向/刷新字号)；资源含bg_owner_dialog_outline_button等3新drawable、
+strings_ui三语言2条新串、统计行从header迁入top布局
