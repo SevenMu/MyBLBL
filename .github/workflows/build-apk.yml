@@ -1,10 +1,6 @@
 name: Android APK Build
+# 已禁用：自动构建与发布改为本地手动执行（CI 的 keystore Secrets 配置不可用）
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - app/build.gradle.kts
   workflow_dispatch:
     inputs:
       force_build:

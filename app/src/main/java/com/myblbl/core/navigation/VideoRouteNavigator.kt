@@ -45,24 +45,6 @@ object VideoRouteNavigator {
             context.toast("当前卡片数据不完整，暂时无法播放")
             return
         }
-        // PGC 剧集条目（历史的番剧/影视记录等）→ 剧集详情页选集：
-        // 剧集级 aid（无 bvid）走 UGC 详情页会拿到单集花絮数据，页面内容错乱。
-        // 仅浏览语境（forcePlayer=false）分流；剧集详情页内的选集/继续观看
-        // 走 forcePlayer=true 的明确播放意图，直接进播放器，否则会重进详情页
-        // 循环（点正片"无法播放"，日志 play-1792158116816-18 实证）。
-        if (!forcePlayer && video.isPgc && video.playbackSeasonId > 0L) {
-            val hostActivity = findMainActivityHost(context)
-            AppLog.d(TAG, "openVideo: pgc season, host=$hostActivity seasonId=${video.playbackSeasonId}")
-            if (hostActivity != null) {
-                hostActivity.openInHostContainer(
-                    com.myblbl.feature.series.SeriesDetailFragment.newInstance(
-                        seasonId = video.playbackSeasonId,
-                        epId = video.playbackEpId
-                    )
-                )
-                return
-            }
-        }
         if (!forcePlayer && shouldOpenVideoDetailFirst(video)) {
             val hostActivity = findMainActivityHost(context)
             AppLog.d(TAG, "openVideo: detailFirst=true, host=$hostActivity")

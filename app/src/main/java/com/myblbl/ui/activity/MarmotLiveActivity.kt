@@ -29,6 +29,8 @@ import com.myblbl.core.common.log.AppLog
 import com.myblbl.core.common.ext.toast
 import com.myblbl.core.ui.base.BaseActivity
 import com.myblbl.databinding.ActivityMarmotLiveBinding
+import com.myblbl.feature.cctv.CctvLiveQuality
+import com.myblbl.feature.cctv.CctvLiveQualityHook
 import com.myblbl.feature.marmot.MarmotCloudUpdate
 import com.myblbl.feature.marmot.MarmotJsBridge
 import com.myblbl.feature.marmot.MarmotLiveData
@@ -226,6 +228,7 @@ class MarmotLiveActivity : BaseActivity<ActivityMarmotLiveBinding>() {
                 }
             },
             onPageLoaded = { url ->
+                AppLog.i(TAG, "页面加载完成: url=$url")
                 // 注意：这里不再调用 showLiveName。
                 // 频道名提示已在 goNext / playCurrent / 频道列表选台时显示。
                 // 若在此再次显示，实机 WebView 加载慢时 onPageLoaded 可能在
@@ -341,7 +344,7 @@ class MarmotLiveActivity : BaseActivity<ActivityMarmotLiveBinding>() {
         if (channelId != null) {
             val baseUrl = "https://tv.cctv.com/live/$channelId/m/" +
                 "#${com.myblbl.feature.marmot.web.MarmotSystemWebViewClient.MYBILI_CCTV_NATIVE_MARKER}"
-            val html = buildCctvPlayerHtml(channelId, cctvQualityProvider.current.br)
+            val html = buildCctvPlayerHtml(channelId, cctvQualityProvider.current)
             AppLog.i(TAG, "playCurrent: CCTV 原生播放 channelId=$channelId quality=${cctvQualityProvider.current.label}")
             // CCTV 自构 HTML 无网页闪现，确保清掉可能残留的遮罩
             hideVideoCover()
@@ -364,11 +367,12 @@ class MarmotLiveActivity : BaseActivity<ActivityMarmotLiveBinding>() {
     /**
      * 构造 CCTV 直播播放 HTML（对标 v1.5.8 `CctvPlayerActivity.buildPlayerHtml`）。
      *
-     * 加载 CCTV 官方 liveplayer.js，调 `createLivePlayer({t: channelId, br: 画质})` 初始化播放器。
-     * [br] 参数直接指定画质码率（1080/720/540/360），切画质 = 改 br 重建（真正切流，区别于 hzChoose 的 click 假切）。
+     * 加载 CCTV 官方 liveplayer.js，调 `createLivePlayer({t: channelId})` 初始化播放器。
+     * 画质：官方脚本已忽略 br 参数，真正切流靠 [CctvLiveQualityHook] 改写 master 清单
+     * 请求的 `b=` 码率窗口（整页重建 = hook 按新档位注入，详见 [CctvLiveQuality]）。
      */
     @SuppressLint("SetJavaScriptEnabled")
-    private fun buildCctvPlayerHtml(channelId: String, br: String): String {
+    private fun buildCctvPlayerHtml(channelId: String, quality: CctvLiveQuality): String {
         val scriptTags = CCTV_PLAYER_SCRIPTS.joinToString("\n") { url ->
             """              <script src="$url"></script>"""
         }
@@ -378,7 +382,7 @@ class MarmotLiveActivity : BaseActivity<ActivityMarmotLiveBinding>() {
             <head>
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-              <title>MyBLBL $channelId</title>
+              <title>MyTVB $channelId</title>
               <style>
                 html,body,#player{width:100%;height:100%;margin:0;padding:0;background:#000;overflow:hidden;}
                 #player{position:fixed;left:0;top:0;z-index:1;}
@@ -393,6 +397,7 @@ $scriptTags
             <body>
               <div id="player"></div>
               <script>
+                ${CctvLiveQualityHook.script(quality.bRange)}
                 (function() {
                   var channel = '$channelId';
                   function size() {
@@ -410,13 +415,35 @@ $scriptTags
                     var s = size();
                     var playerParas = {
                       divId: 'player', w: s.w, h: s.h, t: channel,
-                      isAutoPlay: 'true', ruleVisible: 'false', br: '$br',
+                      isAutoPlay: 'true', ruleVisible: 'false', br: '',
                       posterImg: '', isLive4k: 'false', isHttps: 'true', wmode: 'opaque',
                       hasBarrage: 'false', playerType: 'hw', webFullScreenOn: 'false',
                       isLeftBottom: 'false', jumpToApp: 'false', others: ''
                     };
-                    console.log('mybili cctv createLivePlayer ' + channel + ' ' + s.w + 'x' + s.h + ' br=$br');
+                    console.log('mybili cctv createLivePlayer ' + channel + ' ' + s.w + 'x' + s.h + ' target=${quality.label}');
                     createLivePlayer(playerParas);
+                    // 画质验证上报：起播后上报实际流分辨率，用于核对码率窗口是否真正切流
+                    // （切换无效时各档上报的分辨率会相同）。60s 未起播打一条诊断。
+                    var reported = false;
+                    var t0 = Date.now();
+                    var infoTimer = setInterval(function() {
+                      try {
+                        var v = document.getElementsByTagName('video')[0];
+                        if (!reported && v && (v.videoWidth || 0) > 0 && !v.paused) {
+                          reported = true;
+                          console.log('mybili cctv videoInfo channel=' + channel + ' target=${quality.label} ' +
+                            v.videoWidth + 'x' + v.videoHeight +
+                            ' src=' + (v.currentSrc || v.src || ''));
+                          clearInterval(infoTimer);
+                          return;
+                        }
+                        if (Date.now() - t0 > 60000) {
+                          console.log('mybili cctv videoInfo timeout channel=' + channel + ' target=${quality.label} video=' +
+                            (v ? ((v.videoWidth || 0) + 'x' + (v.videoHeight || 0) + ' paused=' + !!v.paused) : 'none'));
+                          clearInterval(infoTimer);
+                        }
+                      } catch (e) {}
+                    }, 500);
                   }
                   window.addEventListener('resize', function() {
                     var v = document.getElementsByTagName('video')[0];

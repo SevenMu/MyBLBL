@@ -3,6 +3,7 @@ package com.myblbl.feature.player.settings
 import android.content.Context
 import com.myblbl.core.common.media.VideoCodecSupport
 import com.myblbl.core.common.settings.AppSettingsDataStore
+import com.myblbl.feature.player.speed.PlaybackSpeedPolicy
 import com.myblbl.model.video.quality.AudioQuality
 import com.myblbl.model.video.quality.VideoCodecEnum
 import org.koin.mp.KoinPlatform
@@ -35,6 +36,8 @@ data class PlayerSettings(
     val showBottomProgressBar: Boolean = false,
     // 播放页左下角「N人正在看」浮层：关闭后不拉取在线人数也不显示。默认开。
     val showOnlineWatching: Boolean = true,
+    // 章节/看点条（view_points）：进度条分段高亮、章节名、跨章跳转与章节面板的总开关。默认关。
+    val showChapterBar: Boolean = false,
     // 直播 SC（醒目留言）左侧卡片队列：关闭后 WS 仍接收但不显示。默认开。
     val showLiveSuperChat: Boolean = true,
     val simpleKeyPress: Boolean = false,
@@ -49,7 +52,7 @@ data class PlayerSettings(
     val musicZoneNormalSpeed: Boolean = false,
     val fastSeekSeconds: Int = 10,
     val resumePlayback: Boolean = true,
-    val sponsorBlockEnabled: Boolean = false,
+    val sponsorBlockEnabled: Boolean = true,
     val sponsorBlockAutoSkip: Boolean = true,
     // 音量均衡：PCM 级自适应响度归一（VolumeBalanceAudioProcessor），关/低/中/高四档。
     // 取代旧的系统音效方案（DynamicsProcessing/LoudnessEnhancer——部分 TV 设备驱动有 bug 会失真）。默认中档。
@@ -81,6 +84,8 @@ object PlayerSettingsStore {
     const val KEY_SHOW_ONLINE_WATCHING = "show_online_watching"
     // 与 SettingsFragment.KEY_SHOW_LIVE_SUPER_CHAT 同键；存储值"开/关"（parseToggle 口径），默认开。
     const val KEY_SHOW_LIVE_SUPER_CHAT = "show_live_super_chat"
+    // 与 SettingsFragment.KEY_SHOW_CHAPTER_BAR 同键；存储值"开/关"（parseToggle 口径），默认关。
+    const val KEY_SHOW_CHAPTER_BAR = "show_chapter_bar"
     private const val KEY_AFTER_PLAY = "after_play"
     private const val KEY_PLAY_FINISH_EXIT_PLAYER = "play_finish_exit_player"
     private const val KEY_SUBTITLE_DEFAULT_MODE = "subtitle_default_mode"
@@ -155,6 +160,8 @@ object PlayerSettingsStore {
             append(readSetting(KEY_SEAMLESS_QUALITY_SWITCH).orEmpty())
             append("|")
             append(readSetting(KEY_SHOW_LIVE_SUPER_CHAT).orEmpty())
+            append("|")
+            append(readSetting(KEY_SHOW_CHAPTER_BAR).orEmpty())
         }
         if (snapshot == lastSettingsSnapshot) {
             return cachedSettings!!
@@ -166,10 +173,12 @@ object PlayerSettingsStore {
             defaultAudioQualityId = parseAudioQualityId(
                 readSetting(KEY_DEFAULT_AUDIO_TRACK)
             ),
-            defaultPlaybackSpeed = readSetting(KEY_DEFAULT_PLAY_SPEED)
-                ?.toFloatOrNull()
-                ?.takeIf { it > 0f }
-                ?: 1.0f,
+            defaultPlaybackSpeed = PlaybackSpeedPolicy.nearestPlaybackSpeed(
+                readSetting(KEY_DEFAULT_PLAY_SPEED)
+                    ?.toFloatOrNull()
+                    ?.takeIf { it > 0f }
+                    ?: 1.0f
+            ),
             defaultVideoCodec = parseVideoCodec(
                 readSetting(KEY_VIDEO_CODEC),
                 context
@@ -207,6 +216,10 @@ object PlayerSettingsStore {
             showLiveSuperChat = parseToggle(
                 readSetting(KEY_SHOW_LIVE_SUPER_CHAT),
                 defaultValue = true
+            ),
+            showChapterBar = parseToggle(
+                readSetting(KEY_SHOW_CHAPTER_BAR),
+                defaultValue = false
             ),
             simpleKeyPress = parseToggle(
                 readSetting(KEY_SIMPLE_KEY_PRESS),
@@ -248,7 +261,7 @@ object PlayerSettingsStore {
             ),
             sponsorBlockEnabled = parseToggle(
                 readSetting(KEY_SPONSOR_BLOCK_ENABLED),
-                defaultValue = false
+                defaultValue = true
             ),
             sponsorBlockAutoSkip = parseToggle(
                 readSetting(KEY_SPONSOR_BLOCK_AUTO_SKIP),

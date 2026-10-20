@@ -30,6 +30,7 @@ class RecyclerViewFocusOperator(
         position: Int,
         offsetTop: Int = 0,
         reason: String,
+        smooth: Boolean = false,
         onFocused: ((Int) -> Unit)? = null
     ): Boolean {
         if (!adapter.isFocusablePosition(position)) {
@@ -60,12 +61,20 @@ class RecyclerViewFocusOperator(
 
         val layoutManager = recyclerView.layoutManager
         val alreadyVisible = isPositionVisible(position)
-        AppLog.d(TAG, "focusPosition: pos=$position reason=$reason visible=$alreadyVisible attached=${recyclerView.isAttachedToWindow}")
+        AppLog.d(TAG, "focusPosition: pos=$position reason=$reason visible=$alreadyVisible attached=${recyclerView.isAttachedToWindow} smooth=$smooth")
         if (!alreadyVisible) {
             if (layoutManager is LinearLayoutManager) {
-                val offset = scrollOffsetFor(layoutManager, position, offsetTop)
-                AppLog.d(TAG, "focusPosition: scroll pos=$position offset=$offset orientation=${layoutManager.orientation}")
-                layoutManager.scrollToPositionWithOffset(position, offset)
+                if (smooth) {
+                    // 遥控上下移动焦点：平滑滚动跟随选中项。目标 item 布局 attach 后，
+                    // PreDraw/attach 重试链会自然接棒聚焦，高亮与滚动同帧推进，
+                    // 不再"先瞬移到位、下一帧才补焦点高亮"的割裂跳动。
+                    layoutManager.smoothScrollToPosition(recyclerView, RecyclerView.State(), position)
+                    AppLog.d(TAG, "focusPosition: smooth scroll pos=$position")
+                } else {
+                    val offset = scrollOffsetFor(layoutManager, position, offsetTop)
+                    AppLog.d(TAG, "focusPosition: scroll pos=$position offset=$offset orientation=${layoutManager.orientation}")
+                    layoutManager.scrollToPositionWithOffset(position, offset)
+                }
             } else {
                 recyclerView.scrollToPosition(position)
             }

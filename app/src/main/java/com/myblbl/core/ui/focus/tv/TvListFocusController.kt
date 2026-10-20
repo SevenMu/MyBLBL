@@ -802,7 +802,10 @@ class TvListFocusController(
             return false
         }
         logD("focusPosition: pos=$position offset=$offsetTop reason=$reason focused=${describeView(focused)}")
-        return operator.focusPosition(position, offsetTop, reason) { focusedPosition ->
+        // move（遥控上下/左右移动焦点）传 smooth：目标不可见时平滑滚动带高亮同步，
+        // 避免 scrollToPositionWithOffset 瞬移一次突兀跳动、高亮下一帧才补上的割裂感。
+        val smooth = reason == "move"
+        return operator.focusPosition(position, offsetTop, reason, smooth) { focusedPosition ->
             // 焦点落定即关闭「外部焦点恢复窗口」：目标已获焦，无需再防外部抢焦
             restoreOutsideFocusUntilMs = 0L
             unparkFocusInRecyclerViewIfNeeded()

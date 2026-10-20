@@ -178,10 +178,11 @@ interface ApiService {
         @Query("bvid") bvid: String?
     ): BaseResponse<VideoDetailModel>
 
+    /** x/web-interface/view 的 data 是平铺视频对象（非 view/detail 的 View 嵌套），用 VideoView 解析。 */
     @GET("x/web-interface/view")
     suspend fun getVideoDetailByAid(
         @Query("aid") aid: Long
-    ): BaseResponse<VideoDetailModel>
+    ): BaseResponse<com.myblbl.model.video.detail.VideoView>
 
     @GET("x/player/pagelist")
     suspend fun getVideoPv(
@@ -490,11 +491,6 @@ interface ApiService {
     suspend fun getLiveRoomPlayInfoV2(
         @QueryMap params: Map<String, String>
     ): BaseResponse<JsonObject>
-
-    @GET("https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo")
-    suspend fun getLiveChatRoomUrl(
-        @Query("id") id: Long
-    ): BaseResponse<ChatRoomWrapper>
 
     @GET("https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo")
     suspend fun getLiveDanmuInfoSigned(

@@ -29,10 +29,10 @@ import com.myblbl.feature.home.HotViewModel
 import com.myblbl.feature.home.HotFeedRepository
 import com.myblbl.feature.home.HomeLaneFeedRepository
 import com.myblbl.feature.home.HomeLaneViewModel
+import com.myblbl.feature.home.RegionFeedViewModel
 import com.myblbl.feature.home.RecommendDislikeFeedback
 import com.myblbl.feature.home.RecommendFeedRepository
 import com.myblbl.feature.home.RecommendViewModel
-import com.myblbl.feature.home.RegionFeedViewModel
 import com.myblbl.feature.live.LiveListViewModel
 import com.myblbl.feature.live.LiveRecommendViewModel
 import com.myblbl.feature.live.LiveViewModel
@@ -116,7 +116,7 @@ val viewModelModule = module {
 val eventModule = module {
     single { AppEventHub() }
     single { AppSettingsDataStore(androidContext()) }
-    single { DouyinModeManager(androidContext(), get(), get(), get(named("noCookie")), get()) }
+    single { DouyinModeManager(androidContext(), get(), get()) }
 }
 
 val appModules = listOf(

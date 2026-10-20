@@ -17,6 +17,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.myblbl.R
 import com.myblbl.core.common.log.AppLog
 import com.myblbl.feature.player.settings.AfterPlayMode
+import com.myblbl.feature.player.speed.PlaybackSpeedPolicy
 import com.myblbl.feature.player.LiveLineInfo
 import com.myblbl.feature.player.LiveQualityInfo
 import com.myblbl.model.dm.DmScreenArea
@@ -34,7 +35,7 @@ class MyPlayerSettingView @JvmOverloads constructor(
 
     companion object {
         private const val SETTING_FOCUS_LOG_ENABLED = false
-        internal val PLAYBACK_SPEEDS = floatArrayOf(0.25f, 0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f, 3.0f)
+        internal val PLAYBACK_SPEEDS: FloatArray = PlaybackSpeedPolicy.DEFAULT_PLAYBACK_SPEED_OPTIONS
         internal val DM_ALPHA_VALUES = floatArrayOf(0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f, 0.7f, 0.8f, 0.9f, 1.0f)
         // 30-55 为历史档位；56-100 供超宽/低密度屏（如 5120×1600）放大使用
         /** 弹幕字号档位：30~60 步进 2（16 档，视觉放大由引擎 toBlblTextScale 档位系数承担）。 */
@@ -117,6 +118,9 @@ class MyPlayerSettingView @JvmOverloads constructor(
     private var lastFocusedMainItemPosition = 1
     private var lastFocusedDmItemPosition = 1
 
+    /** 倍速子菜单是否由控制栏"播放速度"按键直入（BACK/选完档位应整体关面板而非回主菜单）。 */
+    private var speedMenuEnteredFromController = false
+
     init {
         LayoutInflater.from(context).inflate(R.layout.my_player_setting_view, this, true)
         recyclerView = findViewById(R.id.recyclerView)
@@ -148,6 +152,7 @@ class MyPlayerSettingView @JvmOverloads constructor(
     fun showHide(show: Boolean) {
         animate().cancel()
         if (!show) {
+            speedMenuEnteredFromController = false
             animate()
                 .translationX(panelWidthPx.toFloat())
                 .alpha(0f)
@@ -201,6 +206,14 @@ class MyPlayerSettingView @JvmOverloads constructor(
             }
 
             adapter.currentMenuKey == ITEM_LIVE_LINE -> {
+                showHide(false)
+                true
+            }
+
+            // 控制栏倍速按钮直入的子菜单：BACK 直接关闭整个面板，不回总设置主菜单
+            // （与直播清晰度/线路同模式）；从主菜单点进来的仍回主菜单。
+            adapter.currentMenuKey == ITEM_PLAYBACK_SPEED && speedMenuEnteredFromController -> {
+                speedMenuEnteredFromController = false
                 showHide(false)
                 true
             }
@@ -372,9 +385,11 @@ class MyPlayerSettingView @JvmOverloads constructor(
     /** 控制栏"播放速度"按键入口：直接打开倍速子菜单（面板未显示时先入场再打开）。 */
     fun showPlaybackSpeedMenu() {
         if (!isShowing()) {
+            speedMenuEnteredFromController = true
             showHide(true)
             post { showPlaybackSpeedSubMenu() }
         } else {
+            speedMenuEnteredFromController = false
             showPlaybackSpeedSubMenu()
         }
     }
@@ -544,7 +559,10 @@ class MyPlayerSettingView @JvmOverloads constructor(
     private fun handleMainMenuClick(itemId: Int) {
         when (itemId) {
             ITEM_VIDEO_QUALITY -> showVideoQualityMenu()
-            ITEM_PLAYBACK_SPEED -> showPlaybackSpeedSubMenu()
+            ITEM_PLAYBACK_SPEED -> {
+                speedMenuEnteredFromController = false
+                showPlaybackSpeedSubMenu()
+            }
             ITEM_AFTER_PLAY -> showAfterPlayMenu()
             ITEM_SUBTITLE -> showSubtitles()
             ITEM_VIDEO_CODEC -> showVideoCodecMenu()
@@ -594,7 +612,12 @@ class MyPlayerSettingView @JvmOverloads constructor(
                 updateState { it.copy(currentSpeed = selected) }
                 onPlayerSettingChange?.onPlaybackSpeedChange(selected)
                 onPlayerSettingInnerChange?.onPlaybackSpeedChange(selected)
-                goBackToMainMenu()
+                if (speedMenuEnteredFromController) {
+                    speedMenuEnteredFromController = false
+                    showHide(false)
+                } else {
+                    goBackToMainMenu()
+                }
             }
 
             adapter.currentMenuKey == ITEM_SUBTITLE && (itemId == -1 || itemId in panelState.subtitles.indices) -> {

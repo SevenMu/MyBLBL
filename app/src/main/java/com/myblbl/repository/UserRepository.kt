@@ -65,7 +65,9 @@ class UserRepository(
     )
 
     suspend fun getUserDetailInfo(): BaseResponse<UserDetailInfoModel> {
+        val requestSession = com.myblbl.network.session.RequestSessionScope.capture()
         return apiService.getUserDetailInfo().also { response ->
+            com.myblbl.network.session.RequestSessionScope.requireCurrent(requestSession)
             sessionGateway.syncUserSession(response, source = "getUserDetailInfo")
         }
     }
@@ -307,8 +309,10 @@ class UserRepository(
         }
 
     suspend fun refreshCurrentUserInfo(): Result<UserDetailInfoModel> =
-        runCatching {
+        com.myblbl.core.common.coroutine.catchingRequest {
+            val requestSession = com.myblbl.network.session.RequestSessionScope.capture()
             val response = apiService.getUserDetailInfo()
+            com.myblbl.network.session.RequestSessionScope.requireCurrent(requestSession)
             val info = sessionGateway.syncUserSession(
                 response,
                 source = "refreshCurrentUserInfo"

@@ -3,6 +3,7 @@ package com.myblbl.feature.player
 import android.os.Bundle
 import androidx.annotation.OptIn
 import androidx.media3.common.util.UnstableApi
+import com.myblbl.core.common.log.AppLog
 import com.myblbl.feature.player.settings.AfterPlayMode
 import com.myblbl.model.video.VideoModel
 import com.myblbl.model.video.detail.VideoDetailModel
@@ -10,6 +11,10 @@ import java.util.ArrayDeque
 
 @OptIn(UnstableApi::class)
 class PlayerSessionCoordinator {
+
+    private companion object {
+        const val TAG = "PlayerSession"
+    }
 
     sealed interface ContinuationPlan {
         data class PlayIntent(val intent: ContinuationPlaybackIntent) : ContinuationPlan
@@ -128,6 +133,7 @@ class PlayerSessionCoordinator {
             AfterPlayMode.NOTHING -> finishPlan()
             AfterPlayMode.RECOMMEND -> {
                 val related = nextRelatedVideo()
+                AppLog.i(TAG, "continuation recommend pool=${relatedVideos.size} next=${related?.bvid ?: "none"}")
                 val target = related?.toPreloadTarget(PlaybackPreloadTarget.Source.AUTOPLAY_COUNTDOWN)
                 if (related != null && target != null) {
                     ContinuationPlan.PlayIntent(

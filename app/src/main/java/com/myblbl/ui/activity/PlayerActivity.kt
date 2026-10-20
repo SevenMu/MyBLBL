@@ -41,6 +41,8 @@ import androidx.recyclerview.widget.RecyclerView
 import com.myblbl.R
 import com.myblbl.core.common.content.ContentFilter
 import com.myblbl.core.common.log.AppLog
+import com.myblbl.feature.player.viewpoint.ChapterSegmentBarView
+import com.myblbl.feature.player.viewpoint.ViewPointSegments
 import com.myblbl.core.ui.base.BaseActivity
 import com.myblbl.core.ui.base.ScaledTextView
 import com.myblbl.core.ui.system.ViewUtils
@@ -64,6 +66,7 @@ import com.myblbl.feature.player.settings.PlayerSettings
 import com.myblbl.feature.player.settings.PlayerSettingsStore
 import com.myblbl.feature.player.interaction.InteractionOverlayView
 import com.myblbl.feature.player.PlaybackPreloadTarget
+import com.myblbl.feature.player.PlaybackEndPanelController
 import com.myblbl.feature.player.douyin.DouyinModeManager
 import com.myblbl.feature.player.douyin.DouyinPlaybackCoordinator
 import com.myblbl.feature.player.view.DouyinModeKeyListener
@@ -71,6 +74,7 @@ import com.myblbl.feature.player.view.DouyinModePreview
 import com.myblbl.feature.player.view.MyPlayerView
 import com.myblbl.feature.player.view.OnPlayerSettingChange
 import com.myblbl.feature.player.view.OnVideoSettingChangeListener
+import com.myblbl.model.player.ViewPoint
 import com.myblbl.model.video.VideoModel
 import com.myblbl.model.video.detail.VideoDetailModel
 import com.myblbl.model.video.quality.AudioQuality
@@ -256,6 +260,7 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
 
     private lateinit var playerView: MyPlayerView
     private lateinit var bottomProgressBar: SponsorProgressMarkerView
+    private lateinit var chapterSegmentBar: ChapterSegmentBarView
     private lateinit var textSubtitle: TextView
     private lateinit var viewOnlineWatching: View
     private lateinit var textOnlineWatching: TextView
@@ -273,6 +278,7 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
 
     private lateinit var relatedAdapter: VideoAdapter
     private lateinit var autoPlayController: VideoPlayerAutoPlayController
+    private lateinit var playbackEndPanelController: PlaybackEndPanelController
     private lateinit var overlayUiController: VideoPlayerOverlayController
     private lateinit var resumeHintController: VideoPlayerResumeHintController
 
@@ -281,6 +287,9 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
     private var latestControllerVisibility: Int = View.GONE
     private var latestPlaybackPositionMs: Long = 0L
     private var latestPlaybackDurationMs: Long = 0L
+    // 空降助手静音片段：记录原音量与恢复点，播放到片段尾（或状态归 Hidden/释放播放器）恢复
+    private var sponsorMutedOriginalVolume: Float? = null
+    private var sponsorMuteRestoreAtMs: Long? = null
 
     /** 青少年模式累计观看时长定时器：每 15 秒结算一次，达上限触发休息退出。 */
     private val teenModeHandler = android.os.Handler(android.os.Looper.getMainLooper())
@@ -310,7 +319,6 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
     private fun stopTeenModeTicker() {
         teenModeHandler.removeCallbacks(teenModeTicker)
     }
-    private var pendingRelatedVideosBeforeFirstFrame: List<VideoModel>? = null
     private lateinit var slimTimelineRenderer: SlimTimelineRenderer
     private val sessionCoordinator = PlayerSessionCoordinator()
     private var resumePlaybackWhenStarted: Boolean = false
@@ -355,9 +363,18 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
 
     private val progressCoordinator = VideoPlayerProgressCoordinator(
         playerProvider = { player },
-        publishProgressStateProvider = { bottomProgressBar.isVisible },
+        // 常驻进度显示（细条或章节分段条）任一可见时才高频发布位置状态（节流）；
+        // 章节条接管时细条被抑制，必须把章节条算进来，否则进度推送停摆、条冻结在首帧。
+        publishProgressStateProvider = {
+            bottomProgressBar.isVisible || (::chapterSegmentBar.isInitialized && chapterSegmentBar.isVisible)
+        },
         onProgressPublished = { positionMs, durationMs, publishProgressState ->
             viewModel.updatePlaybackPosition(positionMs, durationMs, publishProgressState)
+            // 空降静音片段到点恢复（独立于 publish 节奏，每轮 500ms 检查）
+            val restoreAt = sponsorMuteRestoreAtMs
+            if (restoreAt != null && positionMs >= restoreAt) {
+                restoreSponsorMuteVolumeIfNeeded()
+            }
             if (publishProgressState) {
                 latestPlaybackPositionMs = positionMs.coerceAtLeast(0L)
                 latestPlaybackDurationMs = durationMs.coerceAtLeast(0L)
@@ -377,6 +394,25 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
     )
 
     private fun cancelResume(): Boolean = resumeHintController.cancelResume()
+
+    /** 空降静音片段开始/顺延：首次记录原音量并置 0，之后仅顺延恢复点。 */
+    private fun applySponsorMute(segment: com.myblbl.feature.player.sponsor.SponsorSegment) {
+        val currentPlayer = player ?: return
+        if (sponsorMutedOriginalVolume == null) {
+            sponsorMutedOriginalVolume = currentPlayer.volume
+            currentPlayer.volume = 0f
+            toast(getString(R.string.player_mute_segment_toast_format, segment.categoryName()))
+        }
+        sponsorMuteRestoreAtMs = segment.endTimeMs
+    }
+
+    /** 恢复空降静音的原音量（到点/换视频/手动 seek/释放播放器四路兜底共用）。 */
+    private fun restoreSponsorMuteVolumeIfNeeded() {
+        val original = sponsorMutedOriginalVolume ?: return
+        player?.volume = original
+        sponsorMutedOriginalVolume = null
+        sponsorMuteRestoreAtMs = null
+    }
 
     private val playerPerfListener = object : AnalyticsListener {
         override fun onLoadStarted(
@@ -523,7 +559,7 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
                     playerView.stopDanmaku()
                     // 播完瞬间强制补发收尾心跳+直写历史（对齐 blbl），需覆盖下方提前 return 的路径。
                     progressCoordinator.syncNow()
-                    viewModel.reportPlaybackHeartbeat(force = true)
+                    viewModel.reportPlaybackHeartbeat(force = true, videoEnded = true)
                     // 公益广告锁死模式：播完唯一出口，先停播放器再退出，避免被 repeatMode/连播逻辑重新触发
                     if (psasLocked) {
                         player?.repeatMode = Player.REPEAT_MODE_OFF
@@ -545,6 +581,8 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
                     playerView.pauseDanmaku()
                 }
             }
+            // CDN 健康分事件回流（READY/BUFFERING），seek 态由宿主判定后传入。
+            viewModel.reportCdnPlaybackState(playbackState, playerView.seekSession?.isActive() == true)
             syncPlaybackEnvironment()
         }
 
@@ -744,6 +782,11 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
         }
         bottomProgressBar = binding.bottomProgressBar
         slimTimelineRenderer = SlimTimelineRenderer(bottomProgressBar)
+        chapterSegmentBar = binding.chapterSegmentBar
+        chapterSegmentBar.setOnSegmentClickListener { targetMs ->
+            player?.seekTo(targetMs)
+            viewModel.sponsorUserSeek(targetMs)
+        }
         textSubtitle = binding.textSubtitle
         // 字幕有独立字号设置，不与 UI 文字缩放叠加
         ScaledTextView.exempt(textSubtitle)
@@ -833,6 +876,31 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
             },
             onPendingActionCleared = { viewModel.clearPendingContinuation() }
         )
+        playbackEndPanelController = PlaybackEndPanelController(
+            activity = this,
+            panel = binding.viewPlayEndPanel,
+            recyclerView = binding.recyclerViewPlayEnd,
+            replayButton = binding.buttonReplay,
+            relatedTitle = binding.titlePlayEndRelated,
+            relatedProvider = {
+                if (::relatedAdapter.isInitialized) relatedAdapter.getItemsSnapshot() else emptyList()
+            },
+            onReplay = { replayCurrentVideo() },
+            onPlayVideo = { video ->
+                if (isVideoBlockedByMinorProtection(video)) {
+                    toast(getString(R.string.activity_teen_mode_blocked_video))
+                } else {
+                    playerView.hideController()
+                    playbackEndPanelController.hide()
+                    hideNextPreview()
+                    sessionCoordinator.replacePlayQueue(
+                        buildPlayQueue(relatedAdapter.getItemsSnapshot(), video)
+                    )
+                    sessionCoordinator.updateCurrentVideo(video)
+                    viewModel.playRelatedVideo(video)
+                }
+            }
+        )
         overlayUiController = VideoPlayerOverlayController(
             activity = this,
             playerView = playerView,
@@ -904,6 +972,8 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
             it.addListener(playerListener)
             it.addAnalyticsListener(playerPerfListener)
         }
+        // 首帧看门狗到点时读实时位置：lambda 每次读当前字段，release 置 null 后安全返回 0（回退快照）
+        viewModel.livePlaybackPositionProvider = { player?.currentPosition ?: 0L }
         playerView.setPlayer(player)
         // 公益广告锁死模式：关闭控制器（不显示暂停/进度条/设置面板），隐藏各种按钮，强制不循环
         if (psasLocked) {
@@ -956,10 +1026,6 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
                     )
                 }
                 viewModel.onPlaybackFirstFrame()
-                pendingRelatedVideosBeforeFirstFrame?.let { rawRelated ->
-                    pendingRelatedVideosBeforeFirstFrame = null
-                    applyRelatedVideos(rawRelated)
-                }
                 startupTrace
                     ?.takeIf { !it.firstFrameLogged }
                     ?.also {
@@ -1000,7 +1066,12 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
                 }
                 // 控制器进度条已处理 preview 时，不更新细进度条，避免 hide/show 互相打架
                 if (!controllerHandling && ::slimTimelineRenderer.isInitialized) {
-                    slimTimelineRenderer.showPreview(targetMs, durationMs)
+                    if (::chapterSegmentBar.isInitialized && chapterSegmentBar.isVisible) {
+                        // 章节分段条接管常驻条：盲操 seek 预览位置画在分段条上
+                        chapterSegmentBar.setProgress(targetMs, durationMs)
+                    } else {
+                        slimTimelineRenderer.showPreview(targetMs, durationMs)
+                    }
                 }
             },
             danmakuSync = { positionMs -> playerView.syncDanmakuPosition(positionMs, forceSeek = true) },
@@ -1068,6 +1139,7 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
             override fun onNext() { viewModel.playNext() }
             override fun onClose() { finish() }
             override fun onChooseEpisode() { showChooseEpisodeDialog() }
+            override fun onChapterClick() { showChapterDialog() }
             override fun onRelated() { showRelatedPanel() }
             override fun onUpInfo() { showOwnerDetailDialog() }
             override fun onMore() { showPlayerActionDialog() }
@@ -1092,8 +1164,11 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
             override fun onPlaybackSpeedClick() { playerView.showPlaybackSpeedSettingView() }
         })
         playerView.onUserSeekListener = { positionMs ->
+            // 起播期用户 seek 顺延首帧看门狗计时，避免 seek 后瞬间开火换线作废刚提交的进度
+            viewModel.extendFirstFrameWatchdogForUserSeek()
             viewModel.sponsorUserSeek(positionMs)
         }
+        playerView.onChapterPanelRequestListener = { showChapterDialog() }
         renderControllerChrome(View.GONE)
     }
 
@@ -1110,11 +1185,30 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
                 // 公益广告锁死模式：吞掉返回键，不允许退出（dispatchKeyEvent 已拦截，这里是双重保险）
                 if (psasLocked) return
                 if (cancelResume()) {
+                    AppLog.i(TAG, "BACK consumed by cancelResume")
                     return
                 }
+                AppLog.i(
+                    TAG,
+                    "BACK state: pending=${autoPlayController.hasPendingAction} " +
+                        "endPanel=${playbackEndPanelController.isShowing()} " +
+                        "setting=${playerView.isSettingViewShowing()} " +
+                        "panel=${uiCoordinator.hasVisiblePanel()} " +
+                        "controller=${playerView.isControllerFullyVisible()} " +
+                        "ended=${player?.playbackState == Player.STATE_ENDED}"
+                )
                 uiCoordinator.handleBackPress(
                     isSettingShowing = playerView.isSettingViewShowing(),
                     hideSetting = { playerView.showHideSettingView(false) },
+                    isEndPanelShowing = playbackEndPanelController.isShowing(),
+                    hideEndPanel = { playbackEndPanelController.hide() },
+                    isAutoPlayPending = autoPlayController.hasPendingAction,
+                    cancelAutoPlayAndShowEndPanel = {
+                        // 隐藏右下角倒计时卡=取消连播（触发 clearPendingContinuation），并展示推荐页
+                        AppLog.i(TAG, "BACK branch: cancel autoplay + show end panel")
+                        hideNextPreview()
+                        playbackEndPanelController.show()
+                    },
                     isControllerFullyVisible = playerView.isControllerFullyVisible(),
                     hideController = { playerView.hideController() },
                     hidePanel = { hideContentPanel() },
@@ -1193,7 +1287,6 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
                 activeStartupTraceId = playbackRequest.startupTraceId
                 activeStartupTraceStartElapsedMs = playbackRequest.startupTraceStartElapsedMs
                 activeStartupFirstFrameLogged = false
-                pendingRelatedVideosBeforeFirstFrame = null
                 playerPerfTrace = PlayerPerfTrace(prepareMs = System.currentTimeMillis())
                 // 锚定 breakdown 起点(prepare)相对 card_click 的偏移，暴露 card_click→prepare 的盲区。
                 // 该区间含 playinfo 网络请求 + DASH 解析 + 媒源构建，是 breakdown total 未覆盖的部分。
@@ -1444,17 +1537,11 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
         }
 
         lifecycleScope.launch {
+            // related 直接应用，不做「defer 到首帧」：defer 版本依赖首帧回调消费，
+            // 但同一起播内 playbackRequest 二次发射会清 pending、复用 player 实例时
+            // 首帧回调也可能不触发，两路都会把 related 数据弄丢（连播池空=播完直接退出）。
+            // related 列表未打开时 RecyclerView 处于 GONE，首帧前 setData 开销可忽略。
             viewModel.relatedVideos.collect { rawRelated ->
-                if (!activeStartupFirstFrameLogged && rawRelated.isNotEmpty()) {
-                    pendingRelatedVideosBeforeFirstFrame = rawRelated
-                    PlaybackStartupTrace.log(
-                        traceId = activeStartupTraceId,
-                        startElapsedMs = activeStartupTraceStartElapsedMs,
-                        step = "related_filter_deferred",
-                        message = "count=${rawRelated.size}"
-                    )
-                    return@collect
-                }
                 applyRelatedVideos(rawRelated)
             }
         }
@@ -1491,11 +1578,17 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
         lifecycleScope.launch {
             viewModel.sponsorSkipState.collect { state ->
                 when (state) {
-                    is VideoPlayerViewModel.SponsorSkipUiState.Hidden -> {}
+                    is VideoPlayerViewModel.SponsorSkipUiState.Hidden -> {
+                        // 换视频/用户手动 seek 归位时兜底恢复音量
+                        restoreSponsorMuteVolumeIfNeeded()
+                    }
                     is VideoPlayerViewModel.SponsorSkipUiState.ShowButton -> {}
                     is VideoPlayerViewModel.SponsorSkipUiState.AutoSkipped -> {
                         toast(getString(R.string.activity_sponsor_skipped_format, state.segment.categoryName()))
-                        player?.seekTo(state.segment.endTimeMs)
+                        player?.seekTo(state.targetPositionMs)
+                    }
+                    is VideoPlayerViewModel.SponsorSkipUiState.Muted -> {
+                        applySponsorMute(state.segment)
                     }
                 }
             }
@@ -1509,6 +1602,16 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
                     slimTimelineRenderer.setSegments(segments)
                     slimTimelineRenderer.setSponsorDuration(viewModel.duration.value)
                 }
+            }
+        }
+        lifecycleScope.launch {
+            viewModel.viewPoints.collect { points ->
+                applyViewPoints(points)
+            }
+        }
+        lifecycleScope.launch {
+            viewModel.duration.collect { _ ->
+                applyViewPoints(viewModel.viewPoints.value)
             }
         }
         lifecycleScope.launch {
@@ -1617,6 +1720,8 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
         player?.removeListener(playerListener)
         playerView.destroy()
         playerView.stopDanmaku()
+        // player 归还共享池前恢复空降静音的原音量，避免静音态串到下一个会话
+        restoreSponsorMuteVolumeIfNeeded()
         PlayerInstancePool.softDetach(player)
         lastKeepScreenOnState = false
         ViewUtils.keepScreenOn(this, false)
@@ -1701,6 +1806,7 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
 
     private fun applyRelatedVideos(rawRelated: List<VideoModel>) {
         val related = ContentFilter.filterVideos(this@PlayerActivity, rawRelated)
+        AppLog.i(TAG, "applyRelatedVideos raw=${rawRelated.size} filtered=${related.size}")
         sessionCoordinator.updateRelatedVideos(related)
         schedulePreloadAndHeaderRefresh()
         relatedAdapter.setData(related)
@@ -1847,9 +1953,14 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
             lastOnlineWatchingShown = show
             AppLog.d(TAG, "online_watching render text=$text visibility=$latestControllerVisibility show=$show")
         }
-        // 有常驻细进度条时抬到进度条上方一点点；无进度条时贴底（对齐官方无条时的高度）。
+        // 有常驻细进度条/章节分段条时抬到进度条上方一点点；无进度条时贴底（对齐官方无条时的高度）。
         val slimBarVisible = ::bottomProgressBar.isInitialized && bottomProgressBar.isVisible
-        val marginRes = if (slimBarVisible) R.dimen.px7 else R.dimen.px3
+        val chapterBarActive = ::chapterSegmentBar.isInitialized && chapterSegmentBar.isVisible
+        val marginRes = when {
+            chapterBarActive -> R.dimen.px10
+            slimBarVisible -> R.dimen.px7
+            else -> R.dimen.px3
+        }
         (viewOnlineWatching.layoutParams as? FrameLayout.LayoutParams)?.let { params ->
             val targetMargin = resources.getDimensionPixelSize(marginRes)
             if (params.bottomMargin != targetMargin) {
@@ -1869,15 +1980,27 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
             return
         }
         refreshAmbientSlimTimelineState()
-        val shouldShow = ::playerSettings.isInitialized && PlayerScreenLogic.shouldShowSlimTimeline(
-            showBottomProgressBar = playerSettings.showBottomProgressBar,
-            controllerVisibility = latestControllerVisibility,
-            coordinator = uiCoordinator
-        )
-        if (shouldShow) {
-            slimTimelineRenderer.show(latestPlaybackPositionMs, latestPlaybackDurationMs)
-        } else {
+        // 章节分段条接管：控制栏隐藏且有章节时显示（官方 TV 版形态），
+        // 此时抑制常驻细进度条（两者同为常驻条，互斥，即使细条设置开着）。
+        val chapterBarActive = ::chapterSegmentBar.isInitialized &&
+            chapterSegmentBar.hasSegments() &&
+            latestControllerVisibility == View.GONE
+        if (chapterBarActive) {
             slimTimelineRenderer.hide()
+            chapterSegmentBar.isVisible = true
+            chapterSegmentBar.setProgress(latestPlaybackPositionMs, latestPlaybackDurationMs)
+        } else {
+            chapterSegmentBar.isVisible = false
+            val shouldShow = ::playerSettings.isInitialized && PlayerScreenLogic.shouldShowSlimTimeline(
+                showBottomProgressBar = playerSettings.showBottomProgressBar,
+                controllerVisibility = latestControllerVisibility,
+                coordinator = uiCoordinator
+            )
+            if (shouldShow) {
+                slimTimelineRenderer.show(latestPlaybackPositionMs, latestPlaybackDurationMs)
+            } else {
+                slimTimelineRenderer.hide()
+            }
         }
     }
 
@@ -1931,40 +2054,50 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
     private fun recoverFromPlaybackStall(positionMs: Long, stalledMs: Long) {
         val currentPlayer = player ?: return
         if (stalledMs > 3000L) {
-            currentPlayer.seekTo(positionMs + stalledMs)
+            // 前抛目标钳到片尾安全余量内：越过 duration 会被 media3 判 STATE_ENDED，
+            // 走"播完"分发（连播/推荐面板），表现为卡顿自救后进度从 0 开始
+            val durationMs = currentPlayer.duration
+            val upperBound = if (durationMs > 0L) SeekSession.seekUpperBoundMs(durationMs) else Long.MAX_VALUE
+            currentPlayer.seekTo((positionMs + stalledMs).coerceIn(0L, upperBound))
         }
     }
 
     private fun handlePlaybackEnded() {
-        val afterPlayMode = playerSettings.afterPlayMode
-        val hasNextEpisode = viewModel.hasNextEpisode()
-        val nextEpisode = viewModel.getNextEpisode()
-        when (
-            val plan = sessionCoordinator.buildContinuationPlan(
-                afterPlayMode = afterPlayMode,
-                exitPlayerWhenPlaybackFinished = playerSettings.exitPlayerWhenPlaybackFinished,
-                hasNextEpisode = hasNextEpisode,
-                nextEpisode = nextEpisode
-            )
-        ) {
-            is PlayerSessionCoordinator.ContinuationPlan.PlayIntent -> {
-                val intent = plan.intent
-                AppLog.i(TAG, "autoplay plan=${intent.kind} mode=$afterPlayMode cid=${intent.target.cid} id=${intent.id}")
-                val session = viewModel.prepareContinuation(intent) ?: return
-                autoPlayController.queueNextSession(intent.title, intent.coverUrl, session.id)
-            }
-            is PlayerSessionCoordinator.ContinuationPlan.ExitPlayer -> {
-                AppLog.i(TAG, "autoplay plan=exit mode=$afterPlayMode hasNext=$hasNextEpisode nextCid=${nextEpisode?.cid}")
-                finish()
-            }
-            is PlayerSessionCoordinator.ContinuationPlan.ShowController -> {
-                AppLog.i(TAG, "autoplay plan=show_controller mode=$afterPlayMode hasNext=$hasNextEpisode nextCid=${nextEpisode?.cid}")
-                playerView.showController()
-            }
-        }
+        val plan = sessionCoordinator.buildContinuationPlan(
+            afterPlayMode = playerSettings.afterPlayMode,
+            exitPlayerWhenPlaybackFinished = playerSettings.exitPlayerWhenPlaybackFinished,
+            hasNextEpisode = viewModel.hasNextEpisode(),
+            nextEpisode = viewModel.getNextEpisode()
+        )
+        com.myblbl.feature.player.PlaybackCompletionDispatcher.dispatch(
+            plan = plan,
+            mode = playerSettings.afterPlayMode,
+            locked = psasLocked,
+            play = { intent ->
+                val session = viewModel.prepareContinuation(intent)
+                if (session != null) autoPlayController.queueNextSession(intent.title, intent.coverUrl, session.id)
+            },
+            showRecommendations = { playbackEndPanelController.show() },
+            exit = { finish() },
+            showController = { playerView.showController() }
+        )
     }
 
     private fun hideNextPreview() { autoPlayController.hideNextPreview() }
+
+    /** 播放结束推荐页的重播：回到 0 从头播（ENDED 状态 seek 自动回 READY），复用用户 seek 的进度上报。 */
+    private fun replayCurrentVideo() {
+        val currentPlayer = player ?: return
+        playbackEndPanelController.hide()
+        AppLog.i(TAG, "playback end panel: replay from start")
+        currentPlayer.seekTo(0)
+        if (currentPlayer.playbackState == Player.STATE_IDLE) {
+            currentPlayer.prepare()
+        }
+        currentPlayer.play()
+        viewModel.sponsorUserSeek(0)
+        restartProgressUpdates()
+    }
 
     /** 试看提示已提示过的 cid，避免 fallback 重建/STATE_READY 反复进入时重复弹 Toast。 */
     private var previewHintShownCid = Long.MIN_VALUE
@@ -1983,6 +2116,40 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
     }
 
     private fun showChooseEpisodeDialog() { overlayUiController.showChooseEpisodeDialog() }
+    private fun showChapterDialog() {
+        val points = viewModel.viewPoints.value
+        if (points.isEmpty()) return
+        val currentPositionMs = player?.currentPosition ?: 0L
+        overlayUiController.showChapterDialog(points, currentPositionMs) { targetMs ->
+            player?.seekTo(targetMs)
+            viewModel.sponsorUserSeek(targetMs)
+        }
+    }
+
+    /**
+     * 章节（view_points）应用到播放器：受「章节进度条」设置开关控制（默认关），
+     * 按当前时长归一化后驱动进度条高亮、章节条显隐、当前章节名与常驻细条的章节起点标记。
+     * duration 晚于章节数据到达时由 duration collect 重算。
+     */
+    private fun applyViewPoints(points: List<ViewPoint>) {
+        val enabled = PlayerSettingsStore.load(applicationContext).showChapterBar
+        val durationMs = viewModel.duration.value
+        val segments = if (enabled) ViewPointSegments.normalize(points, durationMs) else emptyList()
+        AppLog.d(
+            TAG,
+            "viewpoints_trace ui_apply enabled=$enabled points=${points.size} duration=$durationMs segments=${segments.size}"
+        )
+        playerView.setViewPointSegments(segments)
+        playerView.setViewPointDuration(durationMs)
+        if (::slimTimelineRenderer.isInitialized) {
+            slimTimelineRenderer.setChapterStarts(segments.map { it.fromMs }, durationMs)
+        }
+        if (::chapterSegmentBar.isInitialized) {
+            chapterSegmentBar.setSegments(segments, durationMs)
+            // 章节条与常驻细条互斥，段落到达后立即重算常驻条归属
+            renderBottomProgressBar()
+        }
+    }
     private fun showRelatedPanel() { overlayUiController.showRelatedPanel() }
     private fun showOwnerDetailDialog() { overlayUiController.showOwnerDetailDialog() }
     private fun showPlayerActionDialog() { overlayUiController.showPlayerActionDialog() }

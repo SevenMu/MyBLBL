@@ -9,7 +9,7 @@
     <string name="video">Video</string>
     <string name="app_exit">Press back again to exit</string>
     <string name="usage_tip_title">Usage tips</string>
-    <string name="usage_tip_content">1. This app is for learning and research only. Do not use it commercially, to avoid infringing bilibili\'s rights.&lt;br&gt;&lt;br&gt;2. Live entry is supported and can be turned on or off in Settings.&lt;br&gt;&lt;br&gt;3. Long-press a video card for more actions such as Watch later.</string>
+    <string name="usage_tip_content">1. This app is for learning and research only. Do not use it commercially, to avoid infringing bilibili\'s rights.&lt;br&gt;&lt;br&gt;2. Live entry and teen mode are supported and can be turned on or off in Settings.&lt;br&gt;&lt;br&gt;3. To turn off teen mode: &lt;b&gt;&lt;font color=\"#e74c3c\"&gt;press Up, Up, Down, Down, Left, Right, Left, Right on the remote; on a touch screen, quickly tap the captcha area 7 times to pass verification.&lt;/font&gt;&lt;/b&gt;&lt;br&gt;&lt;br&gt;4. Long-press a video card for more actions such as Watch later.</string>
     <string name="audioTrack">Audio track</string>
     <string name="auto">Cars</string>
     <string name="back">Back</string>
@@ -17,6 +17,10 @@
     <string name="cancel">Cancel</string>
     <string name="cartoon">Animation</string>
     <string name="choose_episode">Episodes</string>
+    <string name="chapter_list">Chapters</string>
+    <string name="video_chapter">Video chapters</string>
+    <string name="chapter_playing">Now playing</string>
+    <string name="show_chapter_bar">Chapter bar</string>
     <string name="clear_cache">Clear cache</string>
     <string name="risk_control_verify">Risk control verification</string>
     <string name="risk_register_failed_format">Request failed: %1$s</string>
@@ -31,15 +35,18 @@
     <string name="player_ui_setting">Player UI</string>
     <string name="about_setting">About</string>
     <!-- 设置分组标题 -->
-    <string name="setting_group_browse">Browsing</string>
+    <string name="setting_group_browse">Browsing &amp; Entries</string>
+    <string name="setting_group_interact">Interaction</string>
     <string name="setting_group_network">Network &amp; Account</string>
     <string name="setting_group_storage">Storage</string>
     <string name="setting_group_appearance">Appearance</string>
-    <string name="setting_group_scale">Scale &amp; Quality</string>
-    <string name="setting_group_play_defaults">Defaults</string>
+    <string name="setting_group_scale">Scale &amp; Images</string>
+    <string name="setting_group_quality">Quality &amp; Decoding</string>
+    <string name="setting_group_audio">Audio &amp; Speed</string>
     <string name="setting_group_play_behavior">Behavior</string>
     <string name="setting_group_subtitle">Subtitles</string>
-    <string name="setting_group_controls">Controls</string>
+    <string name="setting_group_progress">Progress &amp; Info</string>
+    <string name="setting_group_controls">Control Buttons</string>
     <string name="setting_group_dm_switch">Switch</string>
     <string name="setting_group_dm_style">Style</string>
     <string name="setting_group_dm_area">Screen Area</string>
@@ -47,8 +54,7 @@
     <string name="setting_group_teen_time">Time Limits</string>
     <string name="setting_group_teen_psas">PSA</string>
     <string name="setting_group_about_app">App</string>
-    <string name="setting_group_components">Components</string>
-    <string name="setting_group_diagnostics">Diagnostics</string>
+    <string name="setting_group_diagnostics">Components &amp; Diagnostics</string>
     <string name="confirm">Confirm</string>
     <string name="confirm_countdown">Confirm (%d)</string>
     <string name="continue_watch">Continue watching</string>
@@ -57,6 +63,10 @@
     <string name="default_audio_track">Default audio quality</string>
     <string name="default_play_speed">Default playback speed</string>
     <string name="default_start_page">Default home tab</string>
+    <string name="home_feed_source">Home feed source</string>
+    <string name="hot_feed_source">Popular source</string>
+    <string name="setting_value_source_app">App</string>
+    <string name="setting_value_source_web">Web</string>
     <string name="default_video_quality">Default quality</string>
     <string name="device_info">Device info</string>
     <string name="dm_allow_bottom">Show bottom danmaku</string>
@@ -237,11 +247,19 @@
     <string name="recent_update">Recently updated</string>
     <string name="recommend">Recommended</string>
     <string name="related_video">Related videos: </string>
+    <string name="play_end_replay">Play again</string>
+    <string name="play_end_related_title">Related</string>
     <string name="retry">Retry</string>
     <string name="rewind">Rewind</string>
     <string name="saturday">Sat</string>
     <string name="scan_sign_in">Scan QR code to sign in</string>
-    <string name="sign_in_qr_failed_format">Failed to get QR code: %1$s</string>
+    <string name="sign_in_qr_expired">QR code expired</string>
+    <string name="sign_in_qr_refresh">Tap to refresh</string>
+    <string name="sign_in_qr_failed_title">Failed to load QR code</string>
+    <string name="sign_in_qr_retry">Tap to retry</string>
+    <string name="sign_in_qr_countdown_format">Expires in %1$s</string>
+    <string name="sign_in_qr_scanned">Scanned. Please confirm on your phone.</string>
+    <string name="sign_in_poll_network_error">Network unavailable. Sign-in cannot complete. Check your connection.</string>
     <string name="science">Science</string>
     <string name="screen_ratio">Screen scale</string>
     <string name="screen_mirror">Screen mirror</string>
@@ -270,7 +288,7 @@
     <string name="theme">Theme</string>
     <string name="thursday">Thu</string>
     <string name="tip_play_from_history">Resumed at %1$s</string>
-    <string name="resume_hint_play_from_start">Play from start</string>
+    <string name="resume_hint_play_from_start">Press Back to play from start</string>
     <string name="total_rank">Overall</string>
     <string name="triple_action">Triple combo</string>
     <string name="tuesday">Tue</string>
@@ -288,7 +306,8 @@
     <string name="codec_info_system_format">System: Android %1$s (SDK %2$d)</string>
     <string name="codec_info_default_codec_format">Default video codec: %1$s</string>
     <string name="ipv4_only">IPv4 only</string>
-    <string name="douyin_mode">Vertical feed mode</string>
+    <string name="cdn_health_routing">Smart CDN routing</string>
+    <string name="douyin_mode">Douyin mode (switch videos with remote up/down)</string>
     <string name="video_info">Video info</string>
     <string name="video_order">Video order</string>
     <string name="video_quality">Quality</string>
@@ -346,6 +365,8 @@
     <string name="seamless_quality_switch">Seamless quality switch</string>
     <string name="app_version">App version</string>
     <string name="check_update">Check for updates</string>
+    <string name="usage_tips">Tips</string>
+    <string name="usage_tips_content">• Press left/right once to seek 10s (stackable); hold to race through the video\n• Focus the progress bar and press Up/OK to open the chapter bar for quick jumps (enable in player UI settings)\n• Long-press a live card to block unwanted streamers or categories\n• Press Back during the auto-play countdown to cancel\n• Black screen or garbled playback: switch "Video codec" to AVC, or enable "Software decoding"\n• To report an issue, enable "LAN log" and scan the code to view live logs on your phone</string>
     <string name="device_model">Device model</string>
     <string name="system_version">System version</string>
     <string name="sdk_version">SDK version</string>
@@ -355,7 +376,12 @@
     <string name="window_metrics_format">%1$dx%2$d · render %3$.2f · design %4$.2f · scale %5$d%%</string>
     <string name="hardware_decode">Hardware decoding</string>
     <string name="log_record">Logging</string>
-    <string name="debug_log">Debug log</string>
+    <string name="lan_log">LAN log</string>
+    <string name="lan_log_hint">With your phone and TV on the same network, scan the QR code or open the address on the left in a browser to view live logs, crash reports and download snapshots.\nThe connection closes when you leave this page.</string>
+    <string name="lan_log_no_network">No LAN IP found. Check the network connection.</string>
+    <string name="lan_log_server_failed">Failed to start log server</string>
+    <string name="lan_log_recording_on">Logging: on</string>
+    <string name="lan_log_recording_off">Logging is off, live log will be empty (enable it in Settings → About → Diagnostics)</string>
 
     <!-- ===== Settings status and toasts ===== -->
     <string name="toast_setting_value_format">%1$s: %2$s</string>
@@ -374,6 +400,8 @@
     <string name="x5_status_cancelled">Cancelled</string>
     <string name="update_found_new">New version found</string>
     <string name="update_download_action">Download update</string>
+    <string name="update_later">Later</string>
+    <string name="session_expired_relogin">Login expired, please sign in again</string>
     <string name="update_downloading_title">Downloading update</string>
     <string name="connecting">Connecting…</string>
     <string name="retrying_format">Connection failed, retrying (%1$d/%2$d)…</string>
@@ -417,17 +445,16 @@
     <string name="konami_hint">Enter the Konami code with the remote D-pad to turn it off!</string>
     <string name="sponsor_testing">Testing…</string>
     <string name="confirm_save">Save</string>
-    <!-- ==================== Home region tabs (region/feed/rcmd dynamic tabs) ==================== -->
     <string name="technology">Technology</string>
     <string name="information">News</string>
     <string name="short_play">Short Play</string>
-    <string name="fashion_beauty">Fashion &amp; Beauty</string>
+    <string name="fashion_beauty">Fashion and Beauty</string>
     <string name="sports">Sports</string>
     <string name="animal">Animals</string>
     <string name="vlog">Vlog</string>
     <string name="painting">Painting</string>
     <string name="artificial_intelligence">AI</string>
-    <string name="home_decor">Home &amp; Living</string>
+    <string name="home_decor">Home and Living</string>
     <string name="outdoors">Outdoors</string>
     <string name="fitness">Fitness</string>
     <string name="handcraft">Handcraft</string>

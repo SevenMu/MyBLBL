@@ -9,7 +9,7 @@
     <string name="video">影片</string>
     <string name="app_exit">再按一次返回退出應用程式</string>
     <string name="usage_tip_title">使用提示</string>
-    <string name="usage_tip_content">1. 本應用程式僅供學習研究使用，請勿用於商業用途，避免侵犯嗶哩嗶哩相關權益。&lt;br&gt;&lt;br&gt;2. 應用程式支援直播入口，可在設定中開啟或關閉。&lt;br&gt;&lt;br&gt;3. 長按影片卡片可進行「稍後觀看」等更多操作。</string>
+    <string name="usage_tip_content">1. 本應用程式僅供學習研究使用，請勿用於商業用途，避免侵犯嗶哩嗶哩相關權益。&lt;br&gt;&lt;br&gt;2. 應用程式支援直播入口和青少年模式，均可在設定中開啟或關閉。&lt;br&gt;&lt;br&gt;3. 青少年模式關閉方法：&lt;b&gt;&lt;font color=\"#e74c3c\"&gt;遙控器依序按「上上下下左右左右」；觸控螢幕連續快速點按驗證碼區域 7 次即可通過驗證。&lt;/font&gt;&lt;/b&gt;&lt;br&gt;&lt;br&gt;4. 長按影片卡片可進行「稍後觀看」等更多操作。</string>
     <string name="audioTrack">音軌</string>
     <string name="auto">汽車</string>
     <string name="back">返回</string>
@@ -17,6 +17,10 @@
     <string name="cancel">取消</string>
     <string name="cartoon">動畫</string>
     <string name="choose_episode">選集</string>
+    <string name="chapter_list">章節列表</string>
+    <string name="video_chapter">影片章節</string>
+    <string name="chapter_playing">正在播放</string>
+    <string name="show_chapter_bar">章節進度條</string>
     <string name="clear_cache">清除快取</string>
     <string name="risk_control_verify">風控驗證</string>
     <string name="risk_register_failed_format">申請失敗：%1$s</string>
@@ -31,15 +35,18 @@
     <string name="player_ui_setting">播放介面</string>
     <string name="about_setting">關於</string>
     <!-- 设置分组标题 -->
-    <string name="setting_group_browse">瀏覽與互動</string>
+    <string name="setting_group_browse">瀏覽與入口</string>
+    <string name="setting_group_interact">互動</string>
     <string name="setting_group_network">網路與帳號</string>
     <string name="setting_group_storage">儲存空間</string>
     <string name="setting_group_appearance">外觀</string>
-    <string name="setting_group_scale">縮放與畫質</string>
-    <string name="setting_group_play_defaults">預設參數</string>
+    <string name="setting_group_scale">縮放與圖片</string>
+    <string name="setting_group_quality">畫質與解碼</string>
+    <string name="setting_group_audio">音質與倍速</string>
     <string name="setting_group_play_behavior">播放行為</string>
     <string name="setting_group_subtitle">字幕</string>
-    <string name="setting_group_controls">控制列顯示</string>
+    <string name="setting_group_progress">進度與資訊</string>
+    <string name="setting_group_controls">控制列按鈕</string>
     <string name="setting_group_dm_switch">開關</string>
     <string name="setting_group_dm_style">樣式</string>
     <string name="setting_group_dm_area">顯示區域</string>
@@ -47,8 +54,7 @@
     <string name="setting_group_teen_time">時間限制</string>
     <string name="setting_group_teen_psas">公益廣告</string>
     <string name="setting_group_about_app">應用程式</string>
-    <string name="setting_group_components">元件</string>
-    <string name="setting_group_diagnostics">診斷</string>
+    <string name="setting_group_diagnostics">元件與診斷</string>
     <string name="confirm">確認</string>
     <string name="confirm_countdown">確認(%d)</string>
     <string name="continue_watch">繼續觀看</string>
@@ -57,6 +63,10 @@
     <string name="default_audio_track">預設音質</string>
     <string name="default_play_speed">預設播放速度</string>
     <string name="default_start_page">預設首頁</string>
+    <string name="home_feed_source">首頁推薦來源</string>
+    <string name="hot_feed_source">熱門來源</string>
+    <string name="setting_value_source_app">APP端</string>
+    <string name="setting_value_source_web">網頁端</string>
     <string name="default_video_quality">預設畫質</string>
     <string name="device_info">裝置資訊</string>
     <string name="dm_allow_bottom">顯示底部彈幕</string>
@@ -238,11 +248,19 @@
     <string name="recent_update">最近更新</string>
     <string name="recommend">推薦</string>
     <string name="related_video">推薦影片：</string>
+    <string name="play_end_replay">重新播放</string>
+    <string name="play_end_related_title">相關推薦</string>
     <string name="retry">重試</string>
     <string name="rewind">倒轉</string>
     <string name="saturday">週六</string>
     <string name="scan_sign_in">掃描 QR Code 登入</string>
-    <string name="sign_in_qr_failed_format">取得 QR Code 失敗: %1$s</string>
+    <string name="sign_in_qr_expired">QR Code 已過期</string>
+    <string name="sign_in_qr_refresh">點擊刷新</string>
+    <string name="sign_in_qr_failed_title">QR Code 取得失敗</string>
+    <string name="sign_in_qr_retry">點擊重試</string>
+    <string name="sign_in_qr_countdown_format">%1$s 後過期</string>
+    <string name="sign_in_qr_scanned">已掃碼，請在手機上確認</string>
+    <string name="sign_in_poll_network_error">網路連線無法使用，掃碼登入暫時無法完成，請檢查網路</string>
     <string name="science">科學</string>
     <string name="screen_ratio">畫面縮放</string>
     <string name="screen_mirror">畫面鏡像</string>
@@ -271,7 +289,7 @@
     <string name="theme">主題</string>
     <string name="thursday">週四</string>
     <string name="tip_play_from_history">已為您定位至 %1$s</string>
-    <string name="resume_hint_play_from_start">從頭播放</string>
+    <string name="resume_hint_play_from_start">按返回鍵從頭播放</string>
     <string name="total_rank">綜合排序</string>
     <string name="triple_action">一鍵三連</string>
     <string name="tuesday">週二</string>
@@ -289,7 +307,8 @@
     <string name="codec_info_system_format">系統：Android %1$s（SDK %2$d）</string>
     <string name="codec_info_default_codec_format">預設影片編碼：%1$s</string>
     <string name="ipv4_only">僅使用IPv4</string>
-    <string name="douyin_mode">上下滑切換影片</string>
+    <string name="cdn_health_routing">CDN智慧選線</string>
+    <string name="douyin_mode">抖音模式（遙控上下切換影片）</string>
     <string name="video_info">影片資訊</string>
     <string name="video_order">影片排序</string>
     <string name="video_quality">畫質</string>
@@ -347,6 +366,8 @@
     <string name="seamless_quality_switch">無縫切換畫質</string>
     <string name="app_version">應用程式版本</string>
     <string name="check_update">檢查更新</string>
+    <string name="usage_tips">使用技巧</string>
+    <string name="usage_tips_content">· 快轉快退輕按一次 10 秒、可連按累積;長按直接快速走完全片\n· 進度條上按「上/OK」呼出章節看點條,一鍵跳轉高能片段(播放介面設定中開啟)\n· 直播卡片長按可封鎖不想看的主播或分區\n· 連播倒數時按返回鍵,可取消自動播下一個\n· 花屏或黑屏:「影片編碼」切到 AVC,不行再開「軟解影片」\n· 回報問題開「區域網路日誌」,掃碼即可在手機看即時日誌</string>
     <string name="device_model">裝置型號</string>
     <string name="system_version">系統版本</string>
     <string name="sdk_version">SDK版本</string>
@@ -356,7 +377,12 @@
     <string name="window_metrics_format">%1$dx%2$d · 渲染%3$.2f · 設計%4$.2f · 縮放%5$d%%</string>
     <string name="hardware_decode">硬解支援</string>
     <string name="log_record">日誌記錄</string>
-    <string name="debug_log">除錯日誌</string>
+    <string name="lan_log">區域網路日誌</string>
+    <string name="lan_log_hint">手機與電視連接同一網路後，掃碼或在手機瀏覽器輸入左側網址，即可查看即時日誌、當機記錄並下載快照\n離開本頁後連線自動關閉</string>
+    <string name="lan_log_no_network">未取得區域網路 IP，請檢查網路連線</string>
+    <string name="lan_log_server_failed">日誌伺服器啟動失敗</string>
+    <string name="lan_log_recording_on">日誌記錄：已開啟</string>
+    <string name="lan_log_recording_off">日誌記錄未開啟，即時日誌將為空（可在 設定→關於→診斷 中開啟）</string>
 
     <!-- ===== 多語言：設定頁狀態與提示 ===== -->
     <string name="toast_cache_cleared">快取已清除</string>
@@ -374,6 +400,8 @@
     <string name="x5_status_cancelled">已取消</string>
     <string name="update_found_new">發現新版本</string>
     <string name="update_download_action">下載更新</string>
+    <string name="update_later">稍後</string>
+    <string name="session_expired_relogin">登入已過期，請重新登入</string>
     <string name="update_downloading_title">正在下載更新</string>
     <string name="connecting">連線中…</string>
     <string name="retrying_format">連線失敗，正在重試（%1$d/%2$d）…</string>
@@ -417,7 +445,6 @@
     <string name="konami_hint">使用遙控器方向鍵輸入魂斗羅密技才能關閉！</string>
     <string name="sponsor_testing">正在測試…</string>
     <string name="confirm_save">儲存</string>
-    <!-- ==================== 首頁分區板塊（region/feed/rcmd 動態 tab） ==================== -->
     <string name="technology">科技</string>
     <string name="information">資訊</string>
     <string name="short_play">小劇場</string>

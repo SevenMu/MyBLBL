@@ -31,6 +31,7 @@ import com.myblbl.core.ui.base.OnBackPressedHandler
 import com.myblbl.model.user.UserDetailInfoModel
 import com.myblbl.feature.category.CategoryFragment
 import com.myblbl.feature.cctv.CctvLiveFragment
+import com.myblbl.feature.cctv.vod.CctvVodFragment
 import com.myblbl.feature.dynamic.DynamicFragment
 import com.myblbl.feature.home.HomeFragment
 import com.myblbl.feature.live.LiveFragment
@@ -45,6 +46,8 @@ import com.myblbl.ui.dialog.UserInfoDialog
 import com.myblbl.feature.player.PlayerInstancePool
 import com.myblbl.feature.player.VideoPlayerFragment
 import com.myblbl.core.common.log.AppLog
+import com.myblbl.core.common.update.ApkUpdater
+import com.myblbl.ui.dialog.UpdateFlowDialog
 import com.myblbl.core.common.net.NetworkRecoveryMonitor
 import com.myblbl.core.ui.navigation.TabBarView
 import com.myblbl.core.common.content.ContentFilter
@@ -69,7 +72,8 @@ class MainActivity : BaseActivity<ActivityMainBinding>(), TabBarView.OnTabClickL
         private const val SETTINGS_OVERLAY_TAG = "settings"
         private const val SETTINGS_OVERLAY_EXIT_ANIM_MS = 275L
         private const val CCTV_TAB_INDEX = 4
-        private const val SEARCH_TAB_INDEX = 6
+        private const val CCTV_VOD_TAB_INDEX = 5
+        private const val SEARCH_TAB_INDEX = 7
         private const val STARTUP_TAG = "AppStartup"
         private const val TEEN_REST_DIAG_TAG = "TeenRestDiag"
     }
@@ -87,14 +91,15 @@ class MainActivity : BaseActivity<ActivityMainBinding>(), TabBarView.OnTabClickL
     }
 
     // tab 顺序固定（与 fragmentFactories 一一对应）：
-    // 0 推荐 / 1 分类 / 2 动态 / 3 直播 / 4 CCTV直播 / 5 我的 / 6 搜索。
-    // 用 lazy factory 让 4 个非首屏 tab 真正点中时再构造，省去 1.1s 的 onCreate 大段时间。
+    // 0 推荐 / 1 分类 / 2 动态 / 3 直播 / 4 CCTV直播 / 5 CCTV影视 / 6 我的 / 7 搜索。
+    // 用 lazy factory 让非首屏 tab 真正点中时再构造，省去 1.1s 的 onCreate 大段时间。
     private val fragmentFactories: List<() -> Fragment> = listOf(
         { HomeFragment.newInstance() },
         { CategoryFragment.newInstance() },
         { DynamicFragment.newInstance() },
         { LiveFragment.newInstance() },
         { CctvLiveFragment.newInstance() },
+        { CctvVodFragment.newInstance() },
         { MeFragment.newInstance() },
         { SearchNewFragment.newInstance() }
     )
@@ -107,6 +112,9 @@ class MainActivity : BaseActivity<ActivityMainBinding>(), TabBarView.OnTabClickL
     private var currentFragmentIndex = -1
     private var exitTime: Long = 0
     private val exitInterval = 2000L
+
+    /** 进入 CCTV 直播等独立 Activity 前置位；窗口焦点回来后检查焦点是否丢失并兜底恢复。 */
+    private var pendingFocusRestoreAfterExternalReturn = false
     private val focusRestoreAnchors = ArrayDeque<FocusRestoreAnchor>()
     private var lastBackStackEntryCount = 0
     private var pendingFocusRestoreDelayMs = 0L
@@ -223,6 +231,7 @@ class MainActivity : BaseActivity<ActivityMainBinding>(), TabBarView.OnTabClickL
         applyCategoryEntryVisibility()
         applyLiveEntryVisibility()
         applyCctvLiveEntryVisibility()
+        applyCctvVodEntryVisibility()
         AppLog.i(STARTUP_TAG, "STARTUP MainActivity.initView elapsed=${SystemClock.elapsedRealtime() - t0}ms")
     }
 
@@ -376,6 +385,15 @@ class MainActivity : BaseActivity<ActivityMainBinding>(), TabBarView.OnTabClickL
         }
     }
 
+    fun applyCctvVodEntryVisibility() {
+        val entry = appSettings.getCachedString("cctv_vod_entry", "关") ?: "关"
+        val show = entry == "开"
+        binding.myTabView.setCctvVodButtonVisible(show)
+        if (!show && currentFragmentIndex == CCTV_VOD_TAB_INDEX) {
+            binding.myTabView.selectTab(0)
+        }
+    }
+
     private fun initFragments() {
         // 不再在这里同步 new 6 个 Fragment，全部走 [getOrCreateFragment] 按需 lazy 构造。
         // savedInstanceState 恢复路径下，FragmentManager 自带 restoredFragment，下面 showFragment
@@ -391,6 +409,7 @@ class MainActivity : BaseActivity<ActivityMainBinding>(), TabBarView.OnTabClickL
         if (index == 1 && !binding.myTabView.isCategoryButtonVisible()) return
         if (index == 3 && !binding.myTabView.isLiveButtonVisible()) return
         if (index == CCTV_TAB_INDEX && !binding.myTabView.isCctvLiveButtonVisible()) return
+        if (index == CCTV_VOD_TAB_INDEX && !binding.myTabView.isCctvVodButtonVisible()) return
         if (currentFragmentIndex == index) return
 
         val fragmentTag = "fragment_$index"
@@ -431,6 +450,7 @@ class MainActivity : BaseActivity<ActivityMainBinding>(), TabBarView.OnTabClickL
         AppLog.d("FocusTrace", "onTabSelected index=$index focusedBefore=${currentFocus?.javaClass?.simpleName}#${currentFocus?.id}")
         // CCTV 直播 tab：直接进 Marmot 播放器，不加载频道列表 Fragment（对标参考 StartActivity→LiveActivity）
         if (index == CCTV_TAB_INDEX) {
+            pendingFocusRestoreAfterExternalReturn = true
             MarmotLiveActivity.start(this)
             // 焦点留在 TV 直播按钮（直播返回后焦点仍在该按钮）
             binding.myTabView.focusCurrentTab()
@@ -448,6 +468,7 @@ class MainActivity : BaseActivity<ActivityMainBinding>(), TabBarView.OnTabClickL
         AppLog.d("FocusTrace", "onTabReselected index=$index focusedBefore=${currentFocus?.javaClass?.simpleName}#${currentFocus?.id}")
         // CCTV 直播 tab 再次点击：重新进入直播（Tab 4 不持有 Fragment，reselect 也要能进直播）
         if (index == CCTV_TAB_INDEX) {
+            pendingFocusRestoreAfterExternalReturn = true
             MarmotLiveActivity.start(this)
             return
         }
@@ -651,7 +672,61 @@ class MainActivity : BaseActivity<ActivityMainBinding>(), TabBarView.OnTabClickL
                     runCatching { sessionGateway.ensureWbiKeys() }
                 }
             }
+            // 启动自动检查更新：放 refreshAvatar(4s) 之后错峰，不抢启动期网络。
+            // GitHub API 国内可达性一般，3 次重试全在后台协程，拖多久都不影响前台
+            .addTask("autoUpdateCheck", AppStartupScheduler.Phase.DELAYED, delayMs = 6000L) {
+                lifecycleScope.launch { checkUpdateOnStartup() }
+            }
+            // 登录态健康检查：SESSDATA 过期后降级型接口（时间表等）只回 code=0 的
+            // 兜底数据不报 -101，App 侧无从感知；启动后主动调 nav 校验一次（24h 频控），
+            // 确认失效且恢复失败时提示用户重新扫码登录
+            .addTask("sessionHealthCheck", AppStartupScheduler.Phase.DELAYED, delayMs = 9000L) {
+                lifecycleScope.launch { checkSessionHealthOnStartup() }
+            }
             .execute()
+    }
+
+    /**
+     * 启动后主动校验登录态（见 NetworkManager.checkSessionHealth 注释）。
+     * 仅"确认失效且恢复失败"才提示用户；网络异常静默，下次启动再查。
+     */
+    private suspend fun checkSessionHealthOnStartup() {
+        val result = runCatching { NetworkManager.checkSessionHealth() }
+            .getOrElse {
+                if (it is kotlinx.coroutines.CancellationException) throw it
+                AppLog.w("MainActivity", "session health check failed: ${it.message}")
+                return
+            }
+        if (result == NetworkManager.SessionHealthResult.EXPIRED_CLEARED) {
+            AppToast.show(this, R.string.session_expired_relogin)
+        }
+    }
+
+    /**
+     * 启动后静默检查更新：有新版本且未被用户「稍后」忽略时自动弹确认弹窗。
+     * 任何失败只记日志不打扰用户；设置页手动检查正在弹窗/下载时直接避让。
+     */
+    private suspend fun checkUpdateOnStartup() {
+        if (UpdateFlowDialog.isBusy) return
+        try {
+            val releaseInfo = ApkUpdater.fetchLatestRelease()
+            if (!ApkUpdater.isRemoteNewer(releaseInfo.versionName)) return
+            if (appSettings.getCachedString(ApkUpdater.KEY_IGNORED_VERSION) == releaseInfo.versionName) return
+            // fetch 期间用户可能已进设置手动检查弹窗，落弹窗前再守一次
+            if (UpdateFlowDialog.isBusy) return
+            UpdateFlowDialog.showConfirmDialog(
+                context = this@MainActivity,
+                releaseInfo = releaseInfo,
+                scope = lifecycleScope,
+                cancelTextRes = R.string.update_later,
+                onDismissedWithoutDownload = {
+                    appSettings.putStringAsync(ApkUpdater.KEY_IGNORED_VERSION, releaseInfo.versionName)
+                },
+            )
+        } catch (e: Exception) {
+            if (e is kotlinx.coroutines.CancellationException) throw e
+            AppLog.w("MainActivity", "startup update check failed: ${e.message}")
+        }
     }
 
     fun focusLeftFunctionArea(sourceView: View? = currentFocus): Boolean {
@@ -969,6 +1044,9 @@ class MainActivity : BaseActivity<ActivityMainBinding>(), TabBarView.OnTabClickL
         super.onResume()
         AppLog.i(TEEN_REST_DIAG_TAG, "onResume after super, before refresh")
         refreshTeenRestOverlay()
+        // TV 常年挂机不杀进程时，启动期那次健康检查可能已是几天前的最后一次；
+        // resume 补查一次，24h 频控保证真实请求每天最多一次，并发由 inFlight 守卫合并
+        lifecycleScope.launch { checkSessionHealthOnStartup() }
     }
 
     override fun onPause() {
@@ -981,6 +1059,19 @@ class MainActivity : BaseActivity<ActivityMainBinding>(), TabBarView.OnTabClickL
         super.onWindowFocusChanged(hasFocus)
         AppLog.i(TEEN_REST_DIAG_TAG, "onWindowFocusChanged hasFocus=$hasFocus")
         dumpTeenRestOverlayState("onWindowFocusChanged($hasFocus)")
+        // 从 MarmotLiveActivity 返回后系统自动焦点回落并不可靠（独立 Activity，无任何
+        // 恢复回调可挂），窗口焦点回来后若整棵视图树无焦点视图则兜底拉回侧栏当前 tab 按钮；
+        // 焦点仍有时不动，避免改变播放器等其它返回路径的正常回落行为。
+        if (hasFocus && pendingFocusRestoreAfterExternalReturn) {
+            pendingFocusRestoreAfterExternalReturn = false
+            binding.root.post {
+                val focused = currentFocus
+                AppLog.d("FocusTrace", "restoreFocusAfterExternalReturn focused=${focused?.javaClass?.simpleName}#${focused?.id}")
+                if (focused == null || !focused.isShown) {
+                    focusSidebarCurrentTab()
+                }
+            }
+        }
     }
 
     /** 检查青少年模式休息状态：休息中显示遮罩并启动倒计时，否则确保遮罩隐藏。 */

@@ -22,6 +22,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatDialog
 import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.os.LocaleListCompat
+import androidx.core.view.doOnNextLayout
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.myblbl.BuildConfig
@@ -29,12 +30,15 @@ import com.myblbl.R
 import com.myblbl.core.common.media.VideoCodecSupport
 import com.myblbl.core.common.update.ApkUpdater
 import com.myblbl.databinding.FragmentSettingsBinding
+import com.myblbl.feature.home.FeedSourceSetting
 import com.myblbl.model.SettingModel
 import com.myblbl.ui.adapter.SettingAdapter
 import com.myblbl.ui.adapter.SettingRow
 import com.myblbl.ui.adapter.SettingSelectionDialogAdapter
 import com.myblbl.core.ui.base.BaseFragment
+import com.myblbl.core.ui.base.OnBackPressedHandler
 import com.myblbl.core.ui.base.ScaledTextView
+import com.myblbl.ui.widget.NonFocusableScrollView
 import com.myblbl.core.ui.base.UiCardSize
 import com.myblbl.core.ui.base.UiTextScale
 import com.myblbl.core.ui.base.UiScale
@@ -50,7 +54,9 @@ import com.myblbl.feature.player.PlayerInstancePool
 import com.myblbl.feature.player.VideoPlayerViewModel
 import com.myblbl.feature.player.cache.PlayerMediaCache
 import com.myblbl.feature.player.settings.AudioBalanceSettings
+import com.myblbl.feature.player.speed.PlaybackSpeedPolicy
 import com.myblbl.feature.player.sponsor.SponsorBlockRepository
+import com.myblbl.feature.player.sponsor.SponsorCategoryPrefs
 import com.myblbl.feature.player.view.MyPlayerSettingView
 import com.myblbl.core.common.ext.normalizeDanmakuSmartFilterValue
 import com.myblbl.core.common.ext.localizedSettingLabel
@@ -60,10 +66,9 @@ import com.myblbl.feature.home.HomeRegionCatalog
 import com.myblbl.ui.adapter.RegionMultiChoiceAdapter
 import com.myblbl.ui.activity.MainActivity
 import com.myblbl.ui.activity.GaiaVgateActivity
-import com.myblbl.ui.widget.NonFocusableScrollView
+import com.myblbl.ui.dialog.UpdateFlowDialog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -74,7 +79,7 @@ import java.util.Locale
 import com.myblbl.core.ui.base.DialogWindowFit
 
 @Suppress("SpellCheckingInspection")
-class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
+class SettingsFragment : BaseFragment<FragmentSettingsBinding>(), OnBackPressedHandler {
 
     companion object {
         fun newInstance() = SettingsFragment()
@@ -90,10 +95,14 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
 
         private const val KEY_CACHE_LIMIT = "cache_limit"
         private const val KEY_DEFAULT_START_PAGE = "default_start_page"
+        // 与 FeedSourceSetting 同键（存储值「APP端/网页端」），首页推荐/热门数据来源
+        private const val KEY_HOME_FEED_SOURCE = FeedSourceSetting.KEY_HOME_FEED_SOURCE
+        private const val KEY_HOT_FEED_SOURCE = FeedSourceSetting.KEY_HOT_FEED_SOURCE
         private const val KEY_IMAGE_QUALITY = "image_quality"
         private const val KEY_THEME = "theme"
         private const val KEY_LIVE_ENTRY = "live_entry"
         private const val KEY_CCTV_LIVE_ENTRY = "cctv_live_entry"
+        private const val KEY_CCTV_VOD_ENTRY = "cctv_vod_entry"
         private const val KEY_MINOR_PROTECTION = "minor_protection"
         private const val KEY_WATCH_TIME_LIMIT = "teen_watch_limit_min"
         private const val KEY_REST_TIME_LIMIT = "teen_rest_limit_min"
@@ -109,6 +118,8 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
         private const val KEY_SOFTWARE_VIDEO_DECODER = "software_video_decoder"
         // 与 PlayerSettingsStore.KEY_SHOW_ONLINE_WATCHING 同键（存储值"开/关"），默认开。
         private const val KEY_SHOW_ONLINE_WATCHING = "show_online_watching"
+        // 与 PlayerSettingsStore.KEY_SHOW_CHAPTER_BAR 同键（存储值"开/关"），默认关。
+        private const val KEY_SHOW_CHAPTER_BAR = "show_chapter_bar"
         // 与 PlayerSettingsStore.KEY_SHOW_LIVE_SUPER_CHAT 同键（存储值"开/关"），默认开。
         private const val KEY_SHOW_LIVE_SUPER_CHAT = "show_live_super_chat"
         private const val KEY_SUBTITLE_DEFAULT_MODE = "subtitle_default_mode"
@@ -116,6 +127,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
         private const val KEY_SHOW_VIDEO_DETAIL = "show_video_detail"
         private const val KEY_SHOW_BOTTOM_PROGRESS_BAR = "show_bottom_progress_bar"
         private const val KEY_GIVE_COIN_NUMBER = "give_coin_number"
+        private const val KEY_HOME_REGIONS = HomeRegionCatalog.PREF_KEY_REGION_TABS
         private const val KEY_SHOW_NEXT_PREVIOUS = "show_next_previous"
         private const val KEY_SHOW_DM_SWITCH = "show_dm_switch"
         private const val KEY_SHOW_PLAY_SPEED_BUTTON = "show_play_speed_button"
@@ -136,8 +148,8 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
         private const val KEY_GAIA_VGATE_V_VOUCHER = "gaia_vgate_v_voucher"
         private const val KEY_GAIA_VGATE_V_VOUCHER_SAVED_AT_MS = "gaia_vgate_v_voucher_saved_at_ms"
         private const val KEY_IPV4_ONLY = "ipv4_only"
+        private const val KEY_CDN_HEALTH_ROUTING = "cdn_health_routing"
         private const val KEY_DOUYIN_MODE = "douyin_mode"
-        private const val KEY_HOME_REGIONS = HomeRegionCatalog.PREF_KEY_REGION_TABS
         private const val KEY_RESUME_PLAYBACK = "resume_playback"
         private const val KEY_SPONSOR_BLOCK_ENABLED = "sponsor_block_enabled"
         private const val KEY_AUDIO_NORMALIZE_LEGACY = "audio_normalize"
@@ -151,9 +163,10 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
         private const val KEY_RISK_CONTROL = "action_risk_control"
         private const val KEY_APP_VERSION = "info_app_version"
         private const val KEY_CHECK_UPDATE = "action_check_update"
+        private const val KEY_USAGE_TIPS = "action_usage_tips"
         private const val KEY_X5_CORE = "action_x5_core"
         private const val KEY_LOG_RECORD = "action_log_record"
-        private const val KEY_DEBUG_LOG = "action_debug_log"
+        private const val KEY_LAN_LOG = "action_lan_log"
         private const val KEY_DEVICE_MODEL = "info_device_model"
         private const val KEY_SYSTEM_VERSION = "info_system_version"
         private const val KEY_SDK_VERSION = "info_sdk_version"
@@ -191,12 +204,11 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
     private lateinit var teenGroups: List<SettingGroup>
     private lateinit var aboutGroups: List<SettingGroup>
     private val appSettings: AppSettingsDataStore by inject()
-    private val cookieManager: CookieManager by inject()
     private val appEventHub: AppEventHub by inject()
+    private val cookieManager: CookieManager by inject()
 
     private val updateScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val updateCheckState = MutableStateFlow<UpdateCheckState>(UpdateCheckState.Idle)
-    private var downloadJob: Job? = null
 
     private sealed interface UpdateCheckState {
         data object Idle : UpdateCheckState
@@ -261,12 +273,17 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
         requireContext().localizedSettingLabel(stored)
 
     private fun initSettings() {
-        // 通用：浏览与互动 / 网络与账号 / 存储
+        // 通用：浏览与入口 / 交互 / 网络与账号 / 存储
         commonGroups = listOf(
             SettingGroup(R.string.setting_group_browse, listOf(
                 stored(KEY_DEFAULT_START_PAGE, R.string.default_start_page, "热门"),
+                stored(KEY_HOME_FEED_SOURCE, R.string.home_feed_source, FeedSourceSetting.DEFAULT),
+                stored(KEY_HOT_FEED_SOURCE, R.string.hot_feed_source, FeedSourceSetting.DEFAULT),
                 stored(KEY_LIVE_ENTRY, R.string.live_entry, "关"),
                 stored(KEY_CCTV_LIVE_ENTRY, R.string.cctv_live, "关"),
+                stored(KEY_CCTV_VOD_ENTRY, R.string.cctv_vod, "关")
+            )),
+            SettingGroup(R.string.setting_group_interact, listOf(
                 stored(KEY_SHOW_VIDEO_DETAIL, R.string.show_video_detail_page, "关"),
                 stored(KEY_DOUYIN_MODE, R.string.douyin_mode, "关"),
                 stored(KEY_GIVE_COIN_NUMBER, R.string.give_coin_number, "2"),
@@ -274,6 +291,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
             )),
             SettingGroup(R.string.setting_group_network, listOf(
                 stored(KEY_IPV4_ONLY, R.string.ipv4_only, "开"),
+                stored(KEY_CDN_HEALTH_ROUTING, R.string.cdn_health_routing, "开"),
                 plain(KEY_RISK_CONTROL, R.string.risk_control_verify, getString(R.string.risk_status_none))
             )),
             SettingGroup(R.string.setting_group_storage, listOf(
@@ -282,7 +300,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
             ))
         )
 
-        // 显示：外观 / 缩放与画质
+        // 显示：外观 / 缩放与图片
         displayGroups = listOf(
             SettingGroup(R.string.setting_group_appearance, listOf(
                 stored(KEY_THEME, R.string.theme, "黑色"),
@@ -296,36 +314,47 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
             ))
         )
 
-        // 播放：默认参数 / 播放行为（同维度相邻：画质↔无缝切换、音质↔音量均衡、倍速↔音乐区倍速）
+        // 播放：画质与解码 / 音质与倍速 / 播放行为
         playerGroups = listOf(
-            SettingGroup(R.string.setting_group_play_defaults, listOf(
+            SettingGroup(R.string.setting_group_quality, listOf(
                 stored(KEY_DEFAULT_VIDEO_QUALITY, R.string.default_video_quality, "1080P"),
                 stored(KEY_SEAMLESS_QUALITY_SWITCH, R.string.seamless_quality_switch, "开"),
+                stored(KEY_VIDEO_CODEC, R.string.video_codec, VideoCodecSupport.defaultPreferredCodec(requireContext()).name),
+                stored(KEY_SOFTWARE_VIDEO_DECODER, R.string.software_video_decoder, "关")
+            )),
+            SettingGroup(R.string.setting_group_audio, listOf(
                 stored(KEY_DEFAULT_AUDIO_TRACK, R.string.default_audio_track, "192kbps"),
                 stored(KEY_AUDIO_BALANCE, R.string.audio_balance, "中"),
                 stored(KEY_DEFAULT_PLAY_SPEED, R.string.default_play_speed, "1.0"),
-                stored(KEY_MUSIC_ZONE_NORMAL_SPEED, R.string.music_zone_normal_speed, "关"),
-                stored(KEY_VIDEO_CODEC, R.string.video_codec, VideoCodecSupport.defaultPreferredCodec(requireContext()).name),
-                stored(KEY_SOFTWARE_VIDEO_DECODER, R.string.software_video_decoder, "关")
+                stored(KEY_MUSIC_ZONE_NORMAL_SPEED, R.string.music_zone_normal_speed, "关")
             )),
             SettingGroup(R.string.setting_group_play_behavior, listOf(
                 stored(KEY_RESUME_PLAYBACK, R.string.resume_playback, "开"),
                 stored(KEY_AFTER_PLAY, R.string.after_play, "播推荐视频"),
-                stored(KEY_PLAY_FINISH_EXIT_PLAYER, R.string.play_finish_exit_player, "开"),
-                stored(KEY_SPONSOR_BLOCK_ENABLED, R.string.sponsor_block, "关")
+                stored(KEY_PLAY_FINISH_EXIT_PLAYER, R.string.play_finish_exit_player, "开")
+            )),
+            // 空降助手：总开关 + 逐类跳过开关（默认总开关开，跳过类型只开赞助/恰饭，其余默认关）
+            SettingGroup(R.string.setting_group_sponsor_skip, listOf(
+                stored(KEY_SPONSOR_BLOCK_ENABLED, R.string.sponsor_block, "开"),
+                *SponsorCategoryPrefs.OPTIONS.map { option ->
+                    stored(option.key, option.titleRes, SponsorCategoryPrefs.defaultStored(option))
+                }.toTypedArray()
             ))
         )
 
-        // 播放界面：字幕 / 控制栏显示
+        // 播放界面：字幕 / 进度与信息 / 控制栏按钮
         playerUiGroups = listOf(
             SettingGroup(R.string.setting_group_subtitle, listOf(
                 stored(KEY_SUBTITLE_DEFAULT_MODE, R.string.show_subtitle_default, "自动字幕"),
                 stored(KEY_SUBTITLE_TEXT_SIZE, R.string.subtitle_text_size, "45")
             )),
-            SettingGroup(R.string.setting_group_controls, listOf(
+            SettingGroup(R.string.setting_group_progress, listOf(
                 stored(KEY_SHOW_BOTTOM_PROGRESS_BAR, R.string.show_bottom_progress_bar, "关"),
+                stored(KEY_SHOW_CHAPTER_BAR, R.string.show_chapter_bar, "关"),
                 stored(KEY_SHOW_ONLINE_WATCHING, R.string.show_online_watching, "开"),
-                stored(KEY_SHOW_LIVE_SUPER_CHAT, R.string.show_live_super_chat, "开"),
+                stored(KEY_SHOW_LIVE_SUPER_CHAT, R.string.show_live_super_chat, "开")
+            )),
+            SettingGroup(R.string.setting_group_controls, listOf(
                 stored(KEY_SHOW_NEXT_PREVIOUS, R.string.show_next_previous, "关"),
                 stored(KEY_SHOW_PLAY_SPEED_BUTTON, R.string.show_play_speed_button, "关"),
                 stored(KEY_SHOW_PLAYBACK_RATE, R.string.show_playback_rate, "关")
@@ -360,7 +389,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
         // 青少年模式：时间限制 / 公益广告
         teenGroups = listOf(
             SettingGroup(R.string.setting_group_teen_time, listOf(
-                stored(KEY_MINOR_PROTECTION, R.string.minor_protection, "关"),
+                stored(KEY_MINOR_PROTECTION, R.string.minor_protection, "开"),
                 plain(KEY_WATCH_TIME_LIMIT, R.string.watch_time_limit, getString(R.string.setting_value_unlimited)),
                 plain(KEY_REST_TIME_LIMIT, R.string.rest_time_limit, getString(R.string.setting_value_unlimited))
             )),
@@ -370,18 +399,18 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
             ))
         )
 
-        // 关于：应用 / 组件 / 诊断 / 设备信息
+        // 关于：应用 / 组件与诊断 / 设备信息
         aboutGroups = listOf(
             SettingGroup(R.string.setting_group_about_app, listOf(
                 plain(KEY_APP_VERSION, R.string.app_version, BuildConfig.VERSION_NAME),
                 plain(KEY_CHECK_UPDATE, R.string.check_update, getString(R.string.update_click_to_check))
-            )),
-            SettingGroup(R.string.setting_group_components, listOf(
-                plain(KEY_X5_CORE, R.string.x5_core_replace, getString(R.string.x5_status_not_installed))
+                // 使用技巧入口暂时屏蔽,弹窗实现保留(showUsageTipsDialog),放开加回:
+                // plain(KEY_USAGE_TIPS, R.string.usage_tips)
             )),
             SettingGroup(R.string.setting_group_diagnostics, listOf(
+                plain(KEY_X5_CORE, R.string.x5_core_replace, getString(R.string.x5_status_not_installed)),
                 plain(KEY_LOG_RECORD, R.string.log_record, getString(if (AppLog.isEnabled) R.string.on else R.string.off)),
-                plain(KEY_DEBUG_LOG, R.string.debug_log)
+                plain(KEY_LAN_LOG, R.string.lan_log)
             )),
             SettingGroup(R.string.device_info, listOf(
                 plain(KEY_DEVICE_MODEL, R.string.device_model, Build.MODEL),
@@ -518,7 +547,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
         }
         val layoutManager = createExtraSpaceLayoutManager(
             resources.getDimensionPixelSize(R.dimen.px200)
-        )
+        ) { categoryButtonOf(currentCategory) }
         binding.recyclerViewSetting.layoutManager = layoutManager
         binding.recyclerViewSetting.adapter = adapter
         binding.recyclerViewSetting.itemAnimator = null
@@ -538,6 +567,86 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
         binding.buttonSettingDm.setOnClickListener { showCategory(CATEGORY_DM) }
         binding.buttonSettingTeen.setOnClickListener { showCategory(CATEGORY_TEEN) }
         binding.buttonSettingAbout.setOnClickListener { showCategory(CATEGORY_ABOUT) }
+        // 左列分类按钮按右键：焦点进入右侧列表首条，避免几何搜索落到就近条目
+        (CATEGORY_COMMON..CATEGORY_ABOUT).forEach { category ->
+            categoryButtonOf(category).setOnKeyListener { _, keyCode, event ->
+                keyCode == KeyEvent.KEYCODE_DPAD_RIGHT &&
+                    event.action == KeyEvent.ACTION_DOWN &&
+                    focusFirstSettingItem()
+            }
+        }
+    }
+
+    /** 分类下标 → 左侧分类按钮（列表只有这一组按钮，顺序与分类一一对应）。 */
+    private fun categoryButtonOf(category: Int): View = when (category) {
+        CATEGORY_COMMON -> binding.buttonSettingCommon
+        CATEGORY_DISPLAY -> binding.buttonSettingDisplay
+        CATEGORY_PLAY -> binding.buttonSettingPlay
+        CATEGORY_PLAYER_UI -> binding.buttonSettingPlayerUi
+        CATEGORY_DM -> binding.buttonSettingDm
+        CATEGORY_TEEN -> binding.buttonSettingTeen
+        else -> binding.buttonSettingAbout
+    }
+
+    /** 把焦点送到右侧列表首条（跳过组头）；列表未布局完成时等下一帧再聚焦。 */
+    private fun focusFirstSettingItem(): Boolean {
+        val recyclerView = binding.recyclerViewSetting
+        val layoutManager = recyclerView.layoutManager as? LinearLayoutManager ?: return false
+        val firstItemPosition = adapter.currentList.indexOfFirst { it is SettingRow.Item }
+        if (firstItemPosition < 0) {
+            return false
+        }
+        fun focusTarget(): Boolean =
+            layoutManager.findViewByPosition(firstItemPosition)
+                ?.let(::firstFocusable)?.requestFocus() == true
+
+        // 列表可能已下滚，回到顶部后首条才在可见范围
+        layoutManager.scrollToPosition(0)
+        if (!focusTarget()) {
+            recyclerView.doOnNextLayout { focusTarget() }
+        }
+        return true
+    }
+
+    private fun firstFocusable(view: View): View? {
+        if (view.visibility != View.VISIBLE) {
+            return null
+        }
+        if (view.isFocusable) {
+            return view
+        }
+        if (view is ViewGroup) {
+            for (index in 0 until view.childCount) {
+                firstFocusable(view.getChildAt(index))?.let { return it }
+            }
+        }
+        return null
+    }
+
+    /**
+     * 返回键两级退出：焦点在右侧设置列表时先回到当前分类对应的左侧按钮，
+     * 再按一次返回才关闭设置页；焦点不在右侧时放行给宿主关闭。
+     */
+    override fun onBackPressed(): Boolean {
+        if (currentCategory !in CATEGORY_COMMON..CATEGORY_ABOUT) {
+            return false
+        }
+        val focused = activity?.currentFocus ?: return false
+        if (!isInsideSettingList(focused)) {
+            return false
+        }
+        return categoryButtonOf(currentCategory).requestFocus()
+    }
+
+    private fun isInsideSettingList(view: View): Boolean {
+        var current: View? = view
+        while (current != null) {
+            if (current === binding.recyclerViewSetting) {
+                return true
+            }
+            current = current.parent as? View
+        }
+        return false
     }
 
     private fun showCategory(category: Int) {
@@ -592,6 +701,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
         when (key) {
             // —— 通用·浏览与互动 ——
             KEY_DEFAULT_START_PAGE -> showCommonChoiceDialog(key, HOME_START_PAGE_OPTIONS)
+            KEY_HOME_FEED_SOURCE, KEY_HOT_FEED_SOURCE -> showCommonChoiceDialog(key, FeedSourceSetting.OPTIONS)
             KEY_LIVE_ENTRY -> toggle(key) {
                 appSettings.putStringAsync(key, it)
                 (activity as? MainActivity)?.applyLiveEntryVisibility()
@@ -600,12 +710,17 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
                 appSettings.putStringAsync(key, it)
                 (activity as? MainActivity)?.applyCctvLiveEntryVisibility()
             }
+            KEY_CCTV_VOD_ENTRY -> toggle(key) {
+                appSettings.putStringAsync(key, it)
+                (activity as? MainActivity)?.applyCctvVodEntryVisibility()
+            }
             KEY_SHOW_VIDEO_DETAIL -> toggle(key)
             KEY_DOUYIN_MODE -> toggle(key)
             KEY_GIVE_COIN_NUMBER -> showCommonChoiceDialog(key, arrayOf("1", "2"))
             KEY_HOME_REGIONS -> showHomeRegionsDialog()
             // —— 通用·网络与账号 ——
             KEY_IPV4_ONLY -> toggle(key)
+            KEY_CDN_HEALTH_ROUTING -> toggle(key)
             KEY_RISK_CONTROL -> showRiskControlDialog()
             // —— 通用·存储 ——
             KEY_CLEAR_CACHE -> clearCache()
@@ -623,17 +738,19 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
             KEY_SEAMLESS_QUALITY_SWITCH -> toggle(key)
             KEY_DEFAULT_AUDIO_TRACK -> showPlayerChoiceDialog(key, arrayOf("192kbps", "132kbps", "64kbps", "杜比全景声", "Hi-Res无损"))
             KEY_AUDIO_BALANCE -> showAudioBalanceChoiceDialog()
-            KEY_DEFAULT_PLAY_SPEED -> showPlayerChoiceDialog(key, arrayOf("0.25", "0.5", "0.75", "1.0", "1.25", "1.5", "2.0", "3.0"))
+            KEY_DEFAULT_PLAY_SPEED -> showPlayerChoiceDialog(key, PlaybackSpeedPolicy.storedSpeedOptions())
             KEY_MUSIC_ZONE_NORMAL_SPEED -> toggle(key)
             KEY_VIDEO_CODEC -> showPlayerChoiceDialog(key, arrayOf("AVC", "HEVC", "AV1"))
             KEY_SOFTWARE_VIDEO_DECODER -> toggle(key)
             KEY_SHOW_ONLINE_WATCHING -> toggle(key)
             KEY_SHOW_LIVE_SUPER_CHAT -> toggle(key)
+            KEY_SHOW_CHAPTER_BAR -> toggle(key)
             // —— 播放·播放行为 ——
             KEY_RESUME_PLAYBACK -> toggle(key)
             KEY_AFTER_PLAY -> showPlayerChoiceDialog(key, arrayOf("什么都不做", "播推荐视频", "播列表中的下一个", "播放合集中的下一个"))
             KEY_PLAY_FINISH_EXIT_PLAYER -> toggle(key)
             KEY_SPONSOR_BLOCK_ENABLED -> toggleSponsorBlock()
+            in SponsorCategoryPrefs.KEYS -> toggle(key)
             // —— 播放界面·字幕 ——
             KEY_SUBTITLE_DEFAULT_MODE -> showPlayerChoiceDialog(key, arrayOf("关闭字幕", "开启字幕", "自动字幕"))
             KEY_SUBTITLE_TEXT_SIZE -> showPlayerChoiceDialog(key, arrayOf("35", "40", "45", "50", "55", "60"))
@@ -677,6 +794,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
             KEY_PSAS_INTERVAL -> showPsasIntervalChoiceDialog()
             // —— 关于 ——
             KEY_CHECK_UPDATE -> checkForUpdate()
+            KEY_USAGE_TIPS -> showUsageTipsDialog()
             KEY_X5_CORE -> startXdDownload()
             KEY_LOG_RECORD -> {
                 val newValue = if (AppLog.isEnabled) "关" else "开"
@@ -684,15 +802,134 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
                 updateInfo(key, labelOf(newValue))
                 AppToast.show(requireContext(), getString(R.string.log_enabled_toast, labelOf(newValue)))
             }
-            KEY_DEBUG_LOG -> {
+            KEY_LAN_LOG -> {
                 val activity = activity as? MainActivity
-                activity?.openOverlayFragment(DebugLogFragment.newInstance(), "debug_log")
+                activity?.openOverlayFragment(LanLogFragment.newInstance(), "lan_log")
             }
             KEY_CODEC_INFO -> {
                 val activity = activity as? MainActivity
                 activity?.openOverlayFragment(CodecInfoFragment.newInstance(), "codec_info")
             }
         }
+    }
+
+    /** 使用技巧弹窗:标题 + 滚动正文 + 关闭按钮;正文过长钳 55% 屏高滚动,焦点在按钮时上下键由弹窗层转发驱动滚动。 */
+    private fun showUsageTipsDialog() {
+        val context = requireContext()
+        val resources = context.resources
+        val px40 = resources.getDimensionPixelSize(R.dimen.px40)
+        val px35 = resources.getDimensionPixelSize(R.dimen.px35)
+        val px20 = resources.getDimensionPixelSize(R.dimen.px20)
+        val px18 = resources.getDimensionPixelSize(R.dimen.px18)
+        val px16 = resources.getDimensionPixelSize(R.dimen.px16)
+        val px14 = resources.getDimensionPixelSize(R.dimen.px14)
+        val px10 = resources.getDimensionPixelSize(R.dimen.px10)
+        val textColor = resources.getColor(R.color.textColor, null)
+
+        val dialog = AppCompatDialog(context, R.style.DialogTheme)
+        dialog.setCanceledOnTouchOutside(true)
+
+        val root = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundResource(R.drawable.dialog_background)
+            isClickable = true
+            isFocusable = false
+            isFocusableInTouchMode = false
+            setOnClickListener { dialog.dismiss() }
+        }
+
+        root.addView(ScaledTextView(context).apply {
+            text = getString(R.string.usage_tips)
+            setTextColor(textColor)
+            setTextSize(TypedValue.COMPLEX_UNIT_PX, resources.getDimension(R.dimen.px36))
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(px40, px35, px40, px20) }
+        })
+
+        root.addView(View(context).apply {
+            setBackgroundColor(0x1FFFFFFF)
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                resources.getDimensionPixelSize(R.dimen.px2)
+            ).apply { setMargins(px18, 0, px18, 0) }
+        })
+
+        val contentScroll = NonFocusableScrollView(context).apply {
+            maxHeight = (resources.displayMetrics.heightPixels * 0.55f).toInt()
+            persistentScrollBar = true
+            isFocusable = false
+            scrollBarWidth = resources.getDimensionPixelSize(R.dimen.px8)
+            isVerticalFadingEdgeEnabled = true
+            setFadingEdgeLength(resources.getDimensionPixelSize(R.dimen.px30))
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(px40, px20, px40, 0)
+                weight = 1f
+            }
+        }
+        contentScroll.addView(ScaledTextView(context).apply {
+            text = getString(R.string.usage_tips_content)
+            setTextColor(textColor)
+            setTextSize(TypedValue.COMPLEX_UNIT_PX, resources.getDimension(R.dimen.px30))
+            setLineSpacing(resources.getDimension(R.dimen.px6), 1f)
+        })
+        root.addView(contentScroll)
+
+        val closeButton = ScaledTextView(context).apply {
+            text = getString(R.string.close)
+            setTextColor(textColor)
+            setTextSize(TypedValue.COMPLEX_UNIT_PX, resources.getDimension(R.dimen.px32))
+            setPadding(px16, px14, px16, px14)
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { dialog.dismiss() }
+            setBackgroundResource(R.drawable.bg_dialog_button)
+        }
+        root.addView(LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.END
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(px18, px20, px18, px18) }
+            addView(closeButton, LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            ).apply { setMargins(px10, 0, px10, 0) })
+        })
+
+        DialogWindowFit.overlay(
+            dialog,
+            DialogWindowFit.wrapContentInScroll(context, root),
+            // 阅读型正文比设置页其他弹窗(px800)更宽,提升单行容纳量;overlay 自动钳屏宽 92%
+            resources.getDimensionPixelSize(R.dimen.px1100),
+            tag = "usageTips"
+        )
+        // 焦点在关闭按钮上时 DPAD 上/下不会路由进 ScrollView,由弹窗层转发驱动正文滚动;
+        // 左右/确认/返回不拦,返回键关闭弹窗不受影响
+        dialog.setOnKeyListener { _, keyCode, event ->
+            if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
+            val step = resources.getDimensionPixelSize(R.dimen.px120)
+            when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_UP -> {
+                    contentScroll.smoothScrollBy(0, -step)
+                    true
+                }
+                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    contentScroll.smoothScrollBy(0, step)
+                    true
+                }
+                else -> false
+            }
+        }
+        dialog.show()
+        // TV 弹窗惯例显式落焦点:show 后立即调会被初始焦点分配覆盖,须等首次布局完成
+        root.post { closeButton.requestFocus() }
     }
 
     /** 触发 X5 TBS 内核下载安装（复刻 APP 升级同款下载弹窗）。 */
@@ -905,8 +1142,6 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
         }
     }
 
-    private var cachedReleaseInfo: ApkUpdater.ReleaseInfo? = null
-
     private fun checkForUpdate() {
         val cooldown = ApkUpdater.cooldownLeftMs()
         if (cooldown > 0) {
@@ -920,11 +1155,18 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
         updateScope.launch {
             try {
                 val releaseInfo = ApkUpdater.fetchLatestRelease()
-                cachedReleaseInfo = releaseInfo
                 if (ApkUpdater.isRemoteNewer(releaseInfo.versionName)) {
                     updateCheckState.value = UpdateCheckState.UpdateAvailable(releaseInfo.versionName)
                     updateUpdateEntry()
-                    showUpdateConfirmDialog(releaseInfo)
+                    UpdateFlowDialog.showConfirmDialog(
+                        context = requireContext(),
+                        releaseInfo = releaseInfo,
+                        scope = updateScope,
+                        listener = UpdateFlowDialog.Listener {
+                            updateCheckState.value = UpdateCheckState.Idle
+                            updateUpdateEntry()
+                        },
+                    )
                 } else {
                     updateCheckState.value = UpdateCheckState.Latest(releaseInfo.versionName)
                     updateUpdateEntry()
@@ -952,273 +1194,9 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
         refreshItem(KEY_CHECK_UPDATE)
     }
 
-    private fun showUpdateConfirmDialog(releaseInfo: ApkUpdater.ReleaseInfo) {
-        val px40 = resources.getDimensionPixelSize(R.dimen.px40)
-        val px35 = resources.getDimensionPixelSize(R.dimen.px35)
-        val px20 = resources.getDimensionPixelSize(R.dimen.px20)
-        val px18 = resources.getDimensionPixelSize(R.dimen.px18)
-        val px16 = resources.getDimensionPixelSize(R.dimen.px16)
-        val px14 = resources.getDimensionPixelSize(R.dimen.px14)
-        val px10 = resources.getDimensionPixelSize(R.dimen.px10)
-        val textColor = resources.getColor(R.color.textColor, null)
-
-        val dialog = AppCompatDialog(requireContext(), R.style.DialogTheme)
-        dialog.setCanceledOnTouchOutside(true)
-
-        val root = LinearLayout(requireContext()).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundResource(R.drawable.dialog_background)
-            isClickable = true
-            isFocusable = false
-            isFocusableInTouchMode = false
-            setOnClickListener { dialog.dismiss() }
-        }
-
-        root.addView(ScaledTextView(requireContext()).apply {
-            text = getString(R.string.update_found_new)
-            setTextColor(textColor)
-            setTextSize(TypedValue.COMPLEX_UNIT_PX, resources.getDimension(R.dimen.px36))
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-            lp.setMargins(px40, px35, px40, px20)
-            layoutParams = lp
-        })
-
-        root.addView(View(requireContext()).apply {
-            setBackgroundColor(0x1FFFFFFF)
-            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, resources.getDimensionPixelSize(R.dimen.px2))
-            lp.setMargins(px18, 0, px18, 0)
-            layoutParams = lp
-        })
-
-        // 更新日志可能很长：正文钳到 55% 屏高转为滚动，避免整个弹窗高度超屏把按钮顶出屏幕。
-        // weight=1：部分系统（如华为 Android 10 电视）window WRAP_CONTENT 时会把超限内容的
-        // 尾部（按钮行）直接裁掉——weight 让正文吃剩余空间，标题与按钮行永远优先保留
-        val notesScroll = NonFocusableScrollView(requireContext()).apply {
-            maxHeight = (resources.displayMetrics.heightPixels * 0.55f).toInt()
-            // 滚动条常驻且加粗（内容不满 maxHeight 不显示，不会误显示），
-            // 上下渐隐边缘提示还有未滚到的内容
-            persistentScrollBar = true
-            // ScrollView 构造默认 focusable，不关掉会抢走弹窗初始焦点，按钮永远落不上
-            isFocusable = false
-            scrollBarWidth = resources.getDimensionPixelSize(R.dimen.px8)
-            isVerticalFadingEdgeEnabled = true
-            setFadingEdgeLength(resources.getDimensionPixelSize(R.dimen.px30))
-            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-            lp.setMargins(px40, px20, px40, 0)
-            lp.weight = 1f
-            layoutParams = lp
-        }
-        notesScroll.addView(ScaledTextView(requireContext()).apply {
-            val notes = if (releaseInfo.releaseNotes.isNotBlank()) {
-                getString(R.string.update_release_notes_format, releaseInfo.releaseNotes)
-            } else ""
-            text = getString(
-                R.string.update_confirm_message_format,
-                BuildConfig.VERSION_NAME,
-                releaseInfo.versionName,
-                notes
-            )
-            setTextColor(textColor)
-            setTextSize(TypedValue.COMPLEX_UNIT_PX, resources.getDimension(R.dimen.px30))
-            setLineSpacing(resources.getDimension(R.dimen.px6), 1f)
-        })
-        root.addView(notesScroll)
-
-        val actionContainer = LinearLayout(requireContext()).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.END
-            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-            lp.setMargins(px18, px20, px18, px18)
-            layoutParams = lp
-        }
-
-        var cancelButton: ScaledTextView? = null
-        listOf(getString(R.string.cancel) to { dialog.dismiss() }, getString(R.string.update_download_action) to {
-            dialog.dismiss()
-            val apkUrl = cachedReleaseInfo?.apkUrl
-            if (apkUrl != null) startDownloadApk(apkUrl)
-        }).forEach { (text, action) ->
-            val button = ScaledTextView(requireContext()).apply {
-                this.text = text
-                setTextColor(textColor)
-                setTextSize(TypedValue.COMPLEX_UNIT_PX, resources.getDimension(R.dimen.px32))
-                setPadding(px16, px14, px16, px14)
-                isClickable = true
-                isFocusable = true
-                setOnClickListener { action() }
-                setBackgroundResource(R.drawable.bg_dialog_button)
-            }
-            if (text == getString(R.string.cancel)) cancelButton = button
-            actionContainer.addView(button, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                setMargins(px10, 0, px10, 0)
-            })
-        }
-
-        root.addView(actionContainer)
-        DialogWindowFit.overlay(
-            dialog,
-            DialogWindowFit.wrapContentInScroll(requireContext(), root),
-            resources.getDimensionPixelSize(R.dimen.px800),
-            cancelOnOutside = false,
-            tag = "riskControl"
-        )
-        // 焦点在按钮上时 DPAD 上/下不会路由进 ScrollView，由弹窗层转发驱动正文滚动；
-        // 左右/确认/返回不拦，按钮焦点切换与关闭行为不受影响
-        dialog.setOnKeyListener { _, keyCode, event ->
-            if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
-            val step = resources.getDimensionPixelSize(R.dimen.px120)
-            when (keyCode) {
-                KeyEvent.KEYCODE_DPAD_UP -> {
-                    notesScroll.smoothScrollBy(0, -step)
-                    true
-                }
-                KeyEvent.KEYCODE_DPAD_DOWN -> {
-                    notesScroll.smoothScrollBy(0, step)
-                    true
-                }
-                else -> false
-            }
-        }
-        dialog.show()
-        // TV 弹窗惯例显式落焦点（其余弹窗均有）：默认在「取消」安全侧，防误触直接开下载；
-        // 遥控器左右在两按钮间切换，上下滚正文。show 后立即调会被 ViewRootImpl 的
-        // 初始焦点分配覆盖，必须等首次布局完成
-        root.post {
-            cancelButton?.requestFocus()
-        }
-    }
-
-    private fun startDownloadApk(apkUrl: String) {
-        val px40 = resources.getDimensionPixelSize(R.dimen.px40)
-        val px35 = resources.getDimensionPixelSize(R.dimen.px35)
-        val px20 = resources.getDimensionPixelSize(R.dimen.px20)
-        val px18 = resources.getDimensionPixelSize(R.dimen.px18)
-        val px14 = resources.getDimensionPixelSize(R.dimen.px14)
-        val textColor = resources.getColor(R.color.textColor, null)
-
-        val dialog = AppCompatDialog(requireContext(), R.style.DialogTheme)
-        dialog.setCancelable(false)
-        dialog.setCanceledOnTouchOutside(false)
-
-        val root = LinearLayout(requireContext()).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundResource(R.drawable.dialog_background)
-        }
-
-        val titleView = ScaledTextView(requireContext()).apply {
-            text = getString(R.string.update_downloading_title)
-            setTextColor(textColor)
-            setTextSize(TypedValue.COMPLEX_UNIT_PX, resources.getDimension(R.dimen.px36))
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-            lp.setMargins(px40, px35, px40, px20)
-            layoutParams = lp
-        }
-        root.addView(titleView)
-
-        root.addView(View(requireContext()).apply {
-            setBackgroundColor(0x1FFFFFFF)
-            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, resources.getDimensionPixelSize(R.dimen.px2))
-            lp.setMargins(px18, 0, px18, 0)
-            layoutParams = lp
-        })
-
-        val progressBar = ProgressBar(requireContext(), null, android.R.attr.progressBarStyleHorizontal).apply {
-            max = 100
-            progress = 0
-            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, resources.getDimensionPixelSize(R.dimen.px20))
-            lp.setMargins(px40, px20, px40, 0)
-            layoutParams = lp
-        }
-        root.addView(progressBar)
-
-        val progressText = ScaledTextView(requireContext()).apply {
-            text = getString(R.string.connecting)
-            setTextColor(textColor)
-            setTextSize(TypedValue.COMPLEX_UNIT_PX, resources.getDimension(R.dimen.px26))
-            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-            lp.setMargins(px40, px14, px40, 0)
-            layoutParams = lp
-        }
-        root.addView(progressText)
-
-        val cancelButton = ScaledTextView(requireContext()).apply {
-            text = getString(R.string.cancel)
-            setTextColor(textColor)
-            setTextSize(TypedValue.COMPLEX_UNIT_PX, resources.getDimension(R.dimen.px32))
-            setPadding(resources.getDimensionPixelSize(R.dimen.px16), px14, resources.getDimensionPixelSize(R.dimen.px16), px14)
-            isClickable = true
-            isFocusable = true
-            setBackgroundResource(R.drawable.bg_dialog_button)
-            setOnClickListener {
-                downloadJob?.cancel()
-                dialog.dismiss()
-                updateCheckState.value = UpdateCheckState.Idle
-                updateUpdateEntry()
-            }
-            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-            lp.setMargins(px18, px20, px18, px18)
-            lp.gravity = Gravity.END
-            layoutParams = lp
-        }
-        root.addView(cancelButton)
-
-        DialogWindowFit.overlay(
-            dialog,
-            DialogWindowFit.wrapContentInScroll(requireContext(), root),
-            resources.getDimensionPixelSize(R.dimen.px800),
-            tag = "apkDownload"
-        )
-        dialog.show()
-
-        downloadJob = updateScope.launch {
-            try {
-                val apkFile = withContext(Dispatchers.IO) {
-                    ApkUpdater.downloadApkToCache(requireContext(), apkUrl) { progress ->
-                        view?.post {
-                            if (!isAdded) return@post
-                            when (progress) {
-                                is ApkUpdater.Progress.Connecting -> {
-                                    progressText.text = getString(R.string.connecting)
-                                    progressBar.isIndeterminate = true
-                                }
-                                is ApkUpdater.Progress.Downloading -> {
-                                    progressBar.isIndeterminate = false
-                                    progress.percent?.let { progressBar.progress = it }
-                                    progressText.text = progress.hint
-                                }
-                                is ApkUpdater.Progress.Done -> {}
-                                is ApkUpdater.Progress.Retrying -> {
-                                    progressText.text = getString(R.string.retrying_format, progress.attempt, progress.maxAttempts)
-                                    progressBar.isIndeterminate = true
-                                }
-                            }
-                        }
-                    }
-                }
-                dialog.dismiss()
-                ApkUpdater.installApk(requireContext(), apkFile)
-            } catch (e: Exception) {
-                if (e is kotlinx.coroutines.CancellationException) return@launch
-                dialog.dismiss()
-                AppLog.e("SettingsFragment", "download apk failed", e)
-                val hint = when (e) {
-                    is java.net.SocketTimeoutException -> getString(R.string.net_timeout_toast)
-                    is java.net.UnknownHostException -> getString(R.string.net_unavailable_toast)
-                    is java.io.IOException -> getString(R.string.net_error_toast)
-                    else -> getString(R.string.download_failed_toast)
-                }
-                AppToast.show(requireContext(), hint, Toast.LENGTH_LONG)
-                updateCheckState.value = UpdateCheckState.Idle
-                updateUpdateEntry()
-            }
-        }
-    }
-
     override fun onDestroyView() {
         super.onDestroyView()
-        downloadJob?.cancel()
+        // 下载 job 挂在 updateScope 上（UpdateFlowDialog），取消 scope 即连带取消
         updateScope.cancel()
     }
 
@@ -1329,11 +1307,22 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
         }
         applyStored(KEY_LIVE_ENTRY)
         applyStored(KEY_CCTV_LIVE_ENTRY)
+        applyStored(KEY_CCTV_VOD_ENTRY)
+        applyStored(KEY_HOME_FEED_SOURCE)
+        applyStored(KEY_HOT_FEED_SOURCE)
+        // 旧版本存储值兜底：不属于当前选项集时回落默认
+        listOf(KEY_HOME_FEED_SOURCE to FeedSourceSetting.OPTIONS, KEY_HOT_FEED_SOURCE to FeedSourceSetting.OPTIONS)
+            .forEach { (key, options) ->
+                itemOf(key)?.let { item ->
+                    if (item.value !in options) setStored(key, FeedSourceSetting.DEFAULT)
+                }
+            }
         updateRiskControlStatus()
         applyStored(KEY_SHOW_VIDEO_DETAIL)
         applyStored(KEY_DOUYIN_MODE)
         applyStored(KEY_GIVE_COIN_NUMBER)
         applyStored(KEY_IPV4_ONLY)
+        applyStored(KEY_CDN_HEALTH_ROUTING)
 
         // —— 显示 ——
         val theme = appSettings.getCachedInt("theme", 1)
@@ -1378,6 +1367,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
         applyStored(KEY_AFTER_PLAY)
         applyStored(KEY_PLAY_FINISH_EXIT_PLAYER)
         applyStored(KEY_SPONSOR_BLOCK_ENABLED)
+        SponsorCategoryPrefs.OPTIONS.forEach { applyStored(it.key) }
 
         // —— 播放界面 ——
         // 字幕设置项：读新 key（subtitle_default_mode），未选过时默认显示"自动字幕"
@@ -1390,6 +1380,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
         applyStored(KEY_SHOW_NEXT_PREVIOUS)
         applyStored(KEY_SHOW_PLAY_SPEED_BUTTON)
         applyStored(KEY_SHOW_PLAYBACK_RATE)
+        applyStored(KEY_SHOW_CHAPTER_BAR)
 
         // —— 弹幕 ——
         applyStored(KEY_DM_SWITCH)
@@ -1741,29 +1732,6 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
         updateSettingsList(buildRows(groups), animate)
     }
 
-    private fun swapPanels(animate: Boolean) {
-        val recyclerView = binding.recyclerViewSetting
-        if (recyclerView.visibility == View.VISIBLE) {
-            return
-        }
-        recyclerView.animate().cancel()
-        if (!animate) {
-            recyclerView.visibility = View.VISIBLE
-            recyclerView.alpha = 1f
-            recyclerView.translationX = 0f
-            return
-        }
-        val offset = resources.getDimension(R.dimen.px20)
-        recyclerView.visibility = View.VISIBLE
-        recyclerView.alpha = 0f
-        recyclerView.translationX = offset
-        recyclerView.animate()
-            .alpha(1f)
-            .translationX(0f)
-            .setDuration(150L)
-            .start()
-    }
-
     /**
      * 首页板块管理：多选弹窗（点击即勾选/取消，立即写入存储并广播
      * HomeRegionsChanged；首页仍被勾选的分区页原地保留，被取消的即从 tab 栏移除）。
@@ -1827,6 +1795,29 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
             }
         }
         dialog.show()
+    }
+
+    private fun swapPanels(animate: Boolean) {
+        val recyclerView = binding.recyclerViewSetting
+        if (recyclerView.visibility == View.VISIBLE) {
+            return
+        }
+        recyclerView.animate().cancel()
+        if (!animate) {
+            recyclerView.visibility = View.VISIBLE
+            recyclerView.alpha = 1f
+            recyclerView.translationX = 0f
+            return
+        }
+        val offset = resources.getDimension(R.dimen.px20)
+        recyclerView.visibility = View.VISIBLE
+        recyclerView.alpha = 0f
+        recyclerView.translationX = offset
+        recyclerView.animate()
+            .alpha(1f)
+            .translationX(0f)
+            .setDuration(150L)
+            .start()
     }
 
     private fun updateSettingsList(rows: List<SettingRow>, animate: Boolean) {
@@ -2341,7 +2332,10 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
         )
     }
 
-    private fun createExtraSpaceLayoutManager(extraLayoutSpacePx: Int): LinearLayoutManager {
+    private fun createExtraSpaceLayoutManager(
+        extraLayoutSpacePx: Int,
+        leftFocusTarget: (() -> View?)? = null
+    ): LinearLayoutManager {
         return object : LinearLayoutManager(requireContext()) {
             override fun calculateExtraLayoutSpace(
                 state: RecyclerView.State,
@@ -2353,6 +2347,10 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>() {
 
             // 列表首尾按上/下键时焦点留在原地，不回退到全局搜索甩到列表外
             override fun onInterceptFocusSearch(focused: View, direction: Int): View? {
+                // 设置页列表：任意条目按左键统一回到当前分类对应的左侧按钮
+                if (direction == View.FOCUS_LEFT) {
+                    leftFocusTarget?.invoke()?.let { return it }
+                }
                 val position = itemLayoutPosition(focused)
                 if (position != RecyclerView.NO_POSITION) {
                     if (direction == View.FOCUS_UP && position == 0) {
