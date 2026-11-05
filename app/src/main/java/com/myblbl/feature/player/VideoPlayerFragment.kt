@@ -336,6 +336,8 @@ class VideoPlayerFragment : Fragment() {
             // 回读给 VM 纠正 UI 选择态与心跳上报档位；非无缝源 id 解析为 null，无副作用。
             parseVideoRepresentationId(format.id)?.let { (qn, codecid) ->
                 viewModel.onSeamlessVideoTrackChanged(qn, codecid)
+                // 新档真实出流 = 切换完成，撤掉左下角「画质切换中」提示
+                playerView.hideQualitySwitchingHint()
             }
         }
 
@@ -401,6 +403,8 @@ class VideoPlayerFragment : Fragment() {
                     viewModel.setLoading(true)
                 }
                 Player.STATE_READY -> {
+                    // 非无缝切换重建完成后回到 READY，撤掉「画质切换中」提示（超时兜底之外的主路径之一）
+                    playerView.hideQualitySwitchingHint()
                     startupTrace
                         ?.takeIf { !it.readyLogged }
                         ?.also {
@@ -431,7 +435,8 @@ class VideoPlayerFragment : Fragment() {
             startupTrace = null
             viewModel.setLoading(false)
             viewModel.handlePlaybackError(error, player?.currentPosition ?: 0L)
-            AppLog.e(TAG, "player error: ${error.message}", error)
+            AppLog.e(TAG, "player error: ${error.message} code=${error.errorCode}", error)
+            playerView.cancelQualitySwitchingHint()
             playerView.pauseDanmaku()
             syncPlaybackEnvironment()
         }
@@ -444,10 +449,12 @@ class VideoPlayerFragment : Fragment() {
                 // 青少年模式：累计观看时长埋点（仅时间限制启用时计时）
                 com.myblbl.core.common.content.TeenModeTimer.onPlayStart()
             } else if (!isPlaying) {
+                // BUFFERING 下 isPlaying 也为 false，但它不是"停了"——解码器停摆的现场就是 BUFFERING。
+                // 这里若照旧 stop()，卡顿监控与自救链会一并停摆，故缓冲中保留轮询。
                 if (player?.playbackState != Player.STATE_BUFFERING) {
                     playerView.pauseDanmaku()
+                    progressCoordinator.stop()
                 }
-                progressCoordinator.stop()
                 progressCoordinator.syncNow(publishProgressState = true)
                 // 青少年模式：结算本段观看时长，达上限则触发休息
                 com.myblbl.core.common.content.TeenModeTimer.onPlayStop()
@@ -813,6 +820,7 @@ class VideoPlayerFragment : Fragment() {
         syncPlaybackEnvironment()
         playerView.setOnPlayerSettingChange(object : OnPlayerSettingChange {
             override fun onVideoQualityChange(quality: VideoQuality) {
+                playerView.showQualitySwitchingHint(quality.displayName(requireContext()))
                 val playbackSnapshot = capturePlaybackSnapshot()
                 viewModel.selectVideoQuality(
                     quality = quality,
@@ -990,7 +998,12 @@ class VideoPlayerFragment : Fragment() {
                         isSettingShowing = playerView.isSettingViewShowing(),
                         hideSetting = { playerView.showHideSettingView(false) },
                         isEndPanelShowing = playbackEndPanelController.isShowing(),
-                        hideEndPanel = { playbackEndPanelController.hide() },
+                        // 播完推荐页按返回直接退出宿主（与 exitPlayer 同路径：临时摘回调让返回穿透）
+                        exitPlayerFromEndPanel = {
+                            isEnabled = false
+                            exitPlayerHost()
+                            isEnabled = true
+                        },
                         isAutoPlayPending = autoPlayController.hasPendingAction,
                         cancelAutoPlayAndShowEndPanel = {
                             // 隐藏右下角倒计时卡=取消连播（触发 clearPendingContinuation），并展示推荐页
@@ -1428,15 +1441,17 @@ class VideoPlayerFragment : Fragment() {
 
     private fun recoverFromPlaybackStall(positionMs: Long, stalledMs: Long) {
         val currentPlayer = player ?: return
-        if (
-            currentPlayer.playbackState != Player.STATE_READY ||
-            !currentPlayer.playWhenReady
-        ) {
+        // 播放中解码器停摆的表现就是掉进 BUFFERING 且时间轴不再推进（数据其实是够的），
+        // 旧守卫只放行 STATE_READY，等于把这类卡死挡在自救链之外。
+        val isStallableState =
+            currentPlayer.playbackState == Player.STATE_READY ||
+                currentPlayer.playbackState == Player.STATE_BUFFERING
+        if (!isStallableState || !currentPlayer.playWhenReady) {
             return
         }
         AppLog.w(
             TAG,
-            "playback stall detected: position=$positionMs, stalledMs=$stalledMs, isPlaying=${currentPlayer.isPlaying}, bufferedPosition=${currentPlayer.bufferedPosition}"
+            "playback stall detected: position=$positionMs, stalledMs=$stalledMs, state=${currentPlayer.playbackState.toPlaybackStateName()}, bufferedPosition=${currentPlayer.bufferedPosition}"
         )
         if (viewModel.handlePlaybackStall(positionMs, stalledMs)) {
             viewModel.setLoading(true)
@@ -1466,6 +1481,7 @@ class VideoPlayerFragment : Fragment() {
             PlayerScreenLogic.isMusicZone(latestVideoInfo?.view)
         playerView.setPlaySpeed(if (musicZoneNormalSpeed) 1f else settings.defaultPlaybackSpeed)
         playerView.showPlaybackRateIndicator(settings.showPlaybackRate)
+        playerView.showAlwaysOnClock(settings.showAlwaysOnClock)
         playerView.setSeekSecond(settings.fastSeekSeconds)
         playerView.setSimpleKeyPressEnabled(settings.simpleKeyPress)
         playerView.setPersistentBottomProgressEnabled(settings.showBottomProgressBar)

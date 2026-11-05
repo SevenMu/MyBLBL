@@ -47,16 +47,18 @@ class CctvVodApi(
     }
 
     /**
-     * 拉取某专辑的分集列表。同一接口在不同分类下用不同 mode，且同一接口会混入
-     * 看点/花絮条目，因此优先取带 part（正片集号）的条目，其次回退到全部条目。
+     * 拉取某专辑的分集列表。**恒以 mode=0（正片）优先，mode=1 只作空列表兜底**：
+     * 官方播放页的 cuqie 写死 mode=0 拉列表、按当前页 URL 里的视频 id 匹配后才创建
+     * 播放器；mode=1 返回的是碎片看点、id 体系与正片完全不同（同一集两个 vid），
+     * 拿 mode=1 的 URL 进播放页永远匹配不上 → video 元素不创建 → 25s 超时报
+     * 「播放地址获取失败」（issue#103，纪录片/动画片 category.episodeMode=1 误用所致）。
      */
-    fun fetchEpisodes(albumId: String, episodeMode: Int): List<CctvEpisode> {
+    fun fetchEpisodes(albumId: String, @Suppress("UNUSED_PARAMETER") episodeMode: Int): List<CctvEpisode> {
         if (albumId.isBlank()) return emptyList()
-        val primary = requestEpisodes(albumId, episodeMode)
+        val primary = requestEpisodes(albumId, 0)
         if (primary.isNotEmpty()) return primary
-        val fallbackMode = if (episodeMode == 0) 1 else 0
-        AppLog.w(TAG, "episodeModeFallback albumId=$albumId mode=$episodeMode -> $fallbackMode")
-        return requestEpisodes(albumId, fallbackMode)
+        AppLog.w(TAG, "episodeModeFallback albumId=$albumId mode=0 -> 1")
+        return requestEpisodes(albumId, 1)
     }
 
     /** guid → HLS 地址 + 清晰度档位。 */
@@ -67,10 +69,15 @@ class CctvVodApi(
             val json = JSONObject(raw)
             val hlsUrl = json.optString("hls_url")
             if (hlsUrl.isBlank()) return@runCatching null
+            // manifest.hls_h5e_url：h5e 加密版主清单（同一 wasm 可解，四档含 720P），
+            // 原生播放（CctvVodPlayerActivity ExoPlayer 模式）直接播它；缺省时回退猜域名。
+            val h5eUrl = json.optJSONObject("manifest")?.optString("hls_h5e_url")
+                ?.takeIf { it.contains(".m3u8") } ?: toH5eMasterUrl(hlsUrl)
             CctvPlayInfo(
                 hlsUrl = hlsUrl,
+                h5eUrl = h5eUrl,
                 title = json.optString("title").ifBlank { "CCTV" },
-                qualities = buildQualities(hlsUrl)
+                qualities = buildQualities(h5eUrl, hlsUrl)
             )
         }.getOrElse { error ->
             AppLog.e(TAG, "parsePlayInfo failed: ${error.message}")
@@ -81,12 +88,13 @@ class CctvVodApi(
     /**
      * 生成清晰度档位。
      *
-     * 优先用网页端那套多码率清单（`dh5ws01.v.cntv.cn/asp/h5e/hls/`，含 720P 两档）；
-     * 它取不到时退回接口同源的两档（master 只列 480x270，但同路径下 850 目录是
+     * 优先 h5e 主清单（`manifest.hls_h5e_url`，450/850/1200/2000 四档、720P 封顶，
+     * 分片为 H5e 加密——与直播同一 wasm，CctvH5eDataSource vod 模式可解）；
+     * 取不到时退回接口同源的两档（master 只列 480x270，但同路径下 850 目录是
      * 另一路 640x360 转码；再往上的 1200/2000 是占位档，内容与 450 相同）。
      */
-    private fun buildQualities(hlsUrl: String): List<CctvQuality> {
-        val web = fetchMasterQualities(toH5eMasterUrl(hlsUrl))
+    private fun buildQualities(h5eUrl: String, hlsUrl: String): List<CctvQuality> {
+        val web = fetchMasterQualities(h5eUrl)
         if (web.size >= 2) return web
         return buildOriginQualities(hlsUrl)
     }
@@ -261,13 +269,15 @@ class CctvVodApi(
         val part: Int?
     )
 
-    private companion object {
+    companion object {
         private const val TAG = "CctvVodApi"
         private const val PAGE_SIZE = 24
         private const val EPISODE_PAGE_SIZE = 100
-        private const val CALLBACK_NAME = "myTvbCb"
-        private const val USER_AGENT =
-            "Mozilla/5.0 (Linux; Android 10; TV; MyTVB) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Mobile Safari/537.36"
+        private const val CALLBACK_NAME = "MyBLBLCb"
+
+        /** 央视点播请求 UA（原生播放的 HTTP DataSource 复用同一身份）。 */
+        const val USER_AGENT =
+            "Mozilla/5.0 (Linux; Android 10; TV; MyBLBL) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Mobile Safari/537.36"
 
         /** 网页端多档清晰度所在的主机与路径前缀（第三方可直连，但请求过密会被临时限流）。 */
         private const val H5E_BASE = "https://dh5ws01.v.cntv.cn"

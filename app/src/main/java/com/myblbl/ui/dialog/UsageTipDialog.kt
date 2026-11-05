@@ -4,23 +4,29 @@ import android.content.Context
 import android.graphics.Color
 import android.os.CountDownTimer
 import android.text.Html
+import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.Window
 import androidx.appcompat.app.AppCompatDialog
 import com.myblbl.R
+import com.myblbl.core.common.log.AppLog
 import com.myblbl.core.ui.base.DialogWindowFit
 import com.myblbl.databinding.DialogUsageTipBinding
 
 class UsageTipDialog(context: Context) : AppCompatDialog(context, R.style.DialogTheme) {
+
+    private companion object {
+        const val TAG = "UsageTipDialog"
+    }
 
     private val binding = DialogUsageTipBinding.inflate(LayoutInflater.from(context))
     private var countDownTimer: CountDownTimer? = null
 
     init {
         supportRequestWindowFeature(Window.FEATURE_NO_TITLE)
-        // 返回键允许直接关闭：否则倒计时期间遥控器/触屏没有任何退出途径，
-        // 用户只能强杀应用（usage_tip_shown 已落盘，关闭后不再弹出）。
-        setCancelable(true)
+        // 倒计时期间禁止任何关闭途径（返回键/外侧触摸/确定键全无效），
+        // 强制阅读满 10 秒；onFinish 里恢复 cancelable 与按钮可点。
+        setCancelable(false)
         setCanceledOnTouchOutside(false)
         // fill 全屏窗口 + 居中卡片（华为电视对独立小窗有延迟裁高，fill 载体不受影响）
         DialogWindowFit.overlay(
@@ -33,11 +39,12 @@ class UsageTipDialog(context: Context) : AppCompatDialog(context, R.style.Dialog
         binding.textScroll.maxHeight =
             (context.resources.displayMetrics.heightPixels * 0.65f).toInt()
 
+        // setOnClickListener 内部会自动 setClickable(true)，必须先挂监听再禁用，
+        // 否则倒计时期间遥控/触屏仍可点确定直接关掉提示。
+        binding.buttonConfirm.setOnClickListener { dismiss() }
         binding.buttonConfirm.setTextColor(Color.GRAY)
         binding.buttonConfirm.isClickable = false
         binding.buttonConfirm.text = context.getString(R.string.confirm_countdown, 10)
-
-        binding.buttonConfirm.setOnClickListener { dismiss() }
 
         binding.textContent.text =
             Html.fromHtml(context.getString(R.string.usage_tip_content), Html.FROM_HTML_MODE_COMPACT)
@@ -56,14 +63,45 @@ class UsageTipDialog(context: Context) : AppCompatDialog(context, R.style.Dialog
             }
 
             override fun onFinish() {
+                AppLog.i(TAG, "onFinish: 恢复 cancelable=true 与按钮可点")
                 binding.buttonConfirm.setText(R.string.confirm)
                 binding.buttonConfirm.setTextColor(
                     context.resources.getColor(R.color.pink, null)
                 )
                 binding.buttonConfirm.isClickable = true
                 binding.buttonConfirm.requestFocus()
+                // 倒计时结束，返回键恢复可关
+                setCancelable(true)
             }
         }.start()
+    }
+
+    // ===== 以下为返回键链路诊断日志，定位后可整体删除 =====
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.keyCode == KeyEvent.KEYCODE_BACK) {
+            AppLog.i(TAG, "dispatchKeyEvent BACK action=${event.action}")
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_BACK) {
+            AppLog.i(TAG, "onKeyDown BACK")
+        }
+        return super.onKeyDown(keyCode, event)
+    }
+
+    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_BACK) {
+            AppLog.i(TAG, "onKeyUp BACK")
+        }
+        return super.onKeyUp(keyCode, event)
+    }
+
+    override fun onBackPressed() {
+        AppLog.i(TAG, "onBackPressed")
+        super.onBackPressed()
     }
 
     override fun onStop() {

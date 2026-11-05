@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/marmot_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -7,12 +8,38 @@
     android:clickable="true"
     android:focusable="true">
 
-    <!-- WebView 容器：直播页面在此渲染 -->
+    <!-- WebView 容器：直播页面在此渲染（WebView 播放路径） -->
     <FrameLayout
         android:id="@+id/webview_wrapper"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:background="@color/black" />
+
+    <!-- 原生直播播放器（issue#106 阶段二：vdn 直拉 H5e 解密流，不走 WebView）。
+         默认隐藏，原生路径启用时顶替 WebView；遮罩在其之上，掀盖逻辑复用。 -->
+    <androidx.media3.ui.PlayerView
+        android:id="@+id/native_player_view"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/black"
+        app:use_controller="false"
+        app:surface_type="texture_view"
+        android:visibility="gone" />
+
+    <!-- 常显时钟：「时间常驻显示」开启时右上角常驻（顶栏呼出时避让，样式与顶栏时钟一致） -->
+    <TextClock
+        android:id="@+id/always_clock"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="end|top"
+        android:layout_marginTop="@dimen/px30"
+        android:layout_marginEnd="@dimen/px50"
+        android:shadowColor="@color/black"
+        android:shadowRadius="7"
+        android:textColor="@color/white"
+        android:textSize="@dimen/px50"
+        android:textStyle="bold"
+        android:visibility="gone" />
 
     <!-- 全黑遮罩：非 CCTV 整页劫持加载期间盖住官网网页，视频就绪后移除，避免网页 UI 闪现 -->
     <View
@@ -287,25 +314,6 @@
             android:layout_weight="1"
             android:background="#00000000"
             android:clickable="true" />
-    </LinearLayout>
-
-    <!-- 画质选择浮层（菜单键弹出，横向列表） -->
-    <LinearLayout
-        android:id="@+id/quality_container"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_gravity="bottom|center_horizontal"
-        android:layout_marginBottom="@dimen/px80"
-        android:background="#F0222222"
-        android:orientation="horizontal"
-        android:padding="@dimen/px20"
-        android:visibility="gone">
-
-        <androidx.recyclerview.widget.RecyclerView
-            android:id="@+id/quality_list"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal" />
     </LinearLayout>
 
 </FrameLayout>

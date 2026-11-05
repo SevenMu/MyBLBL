@@ -29,7 +29,6 @@ import com.myblbl.core.ui.layout.WrapContentGridLayoutManager
 import com.myblbl.core.common.content.ContentFilter
 import com.myblbl.core.common.log.AppLog
 import com.myblbl.core.common.log.PagePerfLogger
-import com.myblbl.core.ui.focus.SpatialFocusNavigator
 import com.myblbl.core.ui.focus.TabContentFocusHelper
 import com.myblbl.core.ui.focus.tv.GridTvFocusStrategy
 import com.myblbl.core.ui.focus.tv.TvDataChangeReason
@@ -70,6 +69,7 @@ class MeListFragment : BaseFragment<FragmentMeTabListBinding>(), MeTabPage, com.
     private val viewModel: MeListViewModel by viewModel()
     private var videoAdapter: VideoAdapter? = null
     private var historyAdapter: HistoryVideoAdapter? = null
+    private var continuationAdapter: ContinuationCardAdapter? = null
     private var swipeRefreshLayout: androidx.swiperefreshlayout.widget.SwipeRefreshLayout? = null
     private var type: String = TYPE_HISTORY
     private var currentPage = 1
@@ -135,7 +135,11 @@ class MeListFragment : BaseFragment<FragmentMeTabListBinding>(), MeTabPage, com.
                 },
                 onLeftEdge = ::switchToPrevMeTab,
                 onRightEdge = ::switchToNextMeTab,
-                onItemFocused = { position -> lastFocusedHistoryPosition = position },
+                onItemFocused = { position ->
+                    lastFocusedHistoryPosition = position
+                    // 焦点快速下移接近底部时提前一屏触发下一页，别等顶死行底
+                    checkHistoryLoadMore()
+                },
                 onItemFocusedWithView = { view, position ->
                     tvFocusController?.onItemFocused(view, position)
                 },
@@ -183,6 +187,17 @@ class MeListFragment : BaseFragment<FragmentMeTabListBinding>(), MeTabPage, com.
         (historyAdapter ?: videoAdapter)?.let { adapter ->
             VideoRecyclerViewTuning.apply(binding.recyclerView, adapter)
         }
+        if (type == TYPE_HISTORY) {
+            // 「继续观看」横条：官方同款入口，接口无推荐时保持隐藏
+            continuationAdapter = ContinuationCardAdapter(onItemClick = ::onHistoryVideoClick)
+            binding.recyclerContinuation.adapter = continuationAdapter
+            binding.recyclerContinuation.layoutManager =
+                androidx.recyclerview.widget.LinearLayoutManager(
+                    requireContext(),
+                    androidx.recyclerview.widget.LinearLayoutManager.HORIZONTAL,
+                    false,
+                )
+        }
         binding.emptyContainer.visibility = View.GONE
         binding.progressBar.visibility = View.GONE
         binding.btnRetry.setOnClickListener {
@@ -210,19 +225,38 @@ class MeListFragment : BaseFragment<FragmentMeTabListBinding>(), MeTabPage, com.
         binding.recyclerView.addOnScrollListener(object : RecyclerView.OnScrollListener() {
             override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
                 super.onScrolled(recyclerView, dx, dy)
-                if (type == TYPE_HISTORY && (!allowHistoryLoadMore || dy <= 0)) {
+                if (type == TYPE_HISTORY) {
+                    if (dy > 0) checkHistoryLoadMore()
                     return
                 }
                 val layoutManager = binding.recyclerView.layoutManager as? WrapContentGridLayoutManager ?: return
                 val totalItemCount = layoutManager.itemCount
                 val lastVisibleItem = layoutManager.findLastVisibleItemPosition()
-                
+
                 if (!viewModel.loading.value && viewModel.hasMore.value && lastVisibleItem >= totalItemCount - 5) {
                     currentPage++
                     loadData()
                 }
             }
         })
+    }
+
+    /**
+     * 历史页触底加载统一入口：滚动(dy>0)、焦点落卡、控制器到底行 edge 三处共用。
+     * 焦点导航通常 dy=0 不产生滚动事件，必须在 onItemFocused 与数据落地处补查
+     * （动态页同款修法），否则长按下键要等焦点顶死行底才触发加载，等待期间
+     * pendingMoveAfterLoadMore 吞键、加载链一旦无声焦点就卡死。
+     */
+    private fun checkHistoryLoadMore() {
+        if (type != TYPE_HISTORY || !allowHistoryLoadMore) return
+        if (viewModel.loading.value || !viewModel.hasMore.value) return
+        val layoutManager = binding.recyclerView.layoutManager as? WrapContentGridLayoutManager ?: return
+        val totalItemCount = layoutManager.itemCount
+        val lastVisibleItem = layoutManager.findLastVisibleItemPosition()
+        if (lastVisibleItem >= totalItemCount - 5) {
+            currentPage++
+            loadData()
+        }
     }
 
     override fun initData() {
@@ -278,6 +312,20 @@ class MeListFragment : BaseFragment<FragmentMeTabListBinding>(), MeTabPage, com.
     override fun initObserver() {
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.continuationVideos.collect { list ->
+                    if (type != TYPE_HISTORY) return@collect
+                    val adapter = continuationAdapter ?: return@collect
+                    if (list.isNullOrEmpty()) {
+                        binding.continuationContainer.visibility = View.GONE
+                    } else {
+                        adapter.submitList(list)
+                        binding.continuationContainer.visibility = View.VISIBLE
+                    }
+                }
+            }
+        }
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 viewModel.uiState.collect { state ->
                     if (type == TYPE_HISTORY) {
                         bindHistoryData(state.historyVideos)
@@ -294,6 +342,12 @@ class MeListFragment : BaseFragment<FragmentMeTabListBinding>(), MeTabPage, com.
                     if (!loading) {
                         swipeRefreshLayout?.isRefreshing = false
                         settlePendingRefreshAfterNoop()
+                        // onTabSelected 重拉前置位 FOCUS_BLOCK_DESCENDANTS 防焦点抢入
+                        // 半空列表，但恢复只挂在部分渲染分支上：TTL 过期重拉走 setData
+                        // 增量分支、错误空态、签名去重跳过等路径都不恢复，列表会永久
+                        // 屏蔽焦点（tab 上按 DOWN 无反应）。BLOCK 的生命周期收敛为
+                        // 加载窗口，此处所有路径必经，统一解锁。
+                        binding.recyclerView.descendantFocusability = ViewGroup.FOCUS_AFTER_DESCENDANTS
                     }
                     val hasData = hasContentItems()
                     binding.progressBar.visibility = if (loading && !hasData) View.VISIBLE else View.GONE
@@ -361,7 +415,10 @@ class MeListFragment : BaseFragment<FragmentMeTabListBinding>(), MeTabPage, com.
             "page=$currentPage source=${if (currentOpenStartMs > 0L) "open" else "refresh"} hasContent=${hasContentItems()}"
         )
         when (type) {
-            TYPE_HISTORY -> viewModel.loadHistory(currentPage, pageSize)
+            TYPE_HISTORY -> {
+                viewModel.loadHistory(currentPage, pageSize)
+                viewModel.loadHistoryContinuation()
+            }
             TYPE_LATER -> viewModel.loadLaterWatch()
         }
     }
@@ -532,6 +589,8 @@ class MeListFragment : BaseFragment<FragmentMeTabListBinding>(), MeTabPage, com.
                 tvFocusController?.onDataChanged(TvDataChangeReason.APPEND)
                 if (type == TYPE_HISTORY) {
                     allowHistoryLoadMore = true
+                    // 追加落地后补查：焦点若仍停在底部附近，立即续拉下一页
+                    checkHistoryLoadMore()
                 }
             }
         }
@@ -757,9 +816,8 @@ class MeListFragment : BaseFragment<FragmentMeTabListBinding>(), MeTabPage, com.
                 }
             },
             loadMore = {
-                if (type == TYPE_HISTORY && allowHistoryLoadMore && !viewModel.loading.value && viewModel.hasMore.value) {
-                    currentPage++
-                    loadData()
+                if (type == TYPE_HISTORY) {
+                    checkHistoryLoadMore()
                 }
             }
         )
@@ -961,17 +1019,9 @@ class MeListFragment : BaseFragment<FragmentMeTabListBinding>(), MeTabPage, com.
     }
 
     override fun focusPrimaryContent(anchorView: View?, preferSpatialEntry: Boolean): Boolean {
-        if (preferSpatialEntry) {
-            val handled = SpatialFocusNavigator.requestBestDescendant(
-                anchorView = anchorView,
-                root = binding.recyclerView,
-                direction = View.FOCUS_RIGHT,
-                fallback = null
-            )
-            if (handled) {
-                return true
-            }
-        }
+        // 从侧栏按右进入：恒定位第一行第一个，不再按锚点(「我的」按钮偏下)做空间
+        // 搜索——空间搜索会落到与按钮同一水平线的第二行卡片（v2.1.14 反馈），
+        // 与其他页面"进入即第一行第一项"的口径不一致
         return focusPrimaryContent()
     }
 
@@ -994,17 +1044,21 @@ class MeListFragment : BaseFragment<FragmentMeTabListBinding>(), MeTabPage, com.
             if (!isAdded || view == null) return@post
             val focused = rv.findFocus()
             if (focused == null) return@post
-            val itemView = rv.findContainingItemView(focused) ?: return@post
+            // 以聚焦视图自身（而非 containing item）计算补偿，与 BaseListFragment
+            // 同口径：item 高于视口时按 item 补偿会把顶部内容整段顶出屏
+            val focusRect = android.graphics.Rect()
+            focused.getDrawingRect(focusRect)
+            rv.offsetDescendantRectToMyCoords(focused, focusRect)
             val padTop = rv.paddingTop
             val visibleBottom = rv.height - rv.paddingBottom
             val delta = when {
-                itemView.top < padTop -> itemView.top - padTop
-                itemView.bottom > visibleBottom -> itemView.bottom - visibleBottom
+                focusRect.top < padTop -> focusRect.top - padTop
+                focusRect.bottom > visibleBottom -> focusRect.bottom - visibleBottom
                 else -> 0
             }
             com.myblbl.core.common.log.AppLog.d(
                 "DownFocus",
-                "[me] post focusedItem top=${itemView.top} bottom=${itemView.bottom} padTop=$padTop visibleBottom=$visibleBottom delta=$delta"
+                "[me] post focusTop=${focusRect.top} focusBottom=${focusRect.bottom} padTop=$padTop visibleBottom=$visibleBottom delta=$delta"
             )
             if (delta != 0) {
                 rv.scrollBy(0, delta)

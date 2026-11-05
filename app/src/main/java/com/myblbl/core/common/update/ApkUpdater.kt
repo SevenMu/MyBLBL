@@ -36,10 +36,49 @@ object ApkUpdater {
     private const val RELEASE_API_URL =
         "https://api.github.com/repos/$GITHUB_OWNER/$GITHUB_REPO/releases/latest"
 
+    /** release 附带的版本元数据文件名，与 APK 一起上传；内容见 AGENTS.md 版本升级流程 */
+    private const val VERSION_JSON_NAME = "version.json"
+    private const val VERSION_JSON_URL =
+        "https://github.com/$GITHUB_OWNER/$GITHUB_REPO/releases/latest/download/$VERSION_JSON_NAME"
+
+    /**
+     * 仓库 main 分支的 version.json（发版三件套之一，与 release 附件同源同内容）。
+     * 二级容错数据源：release 附件漏传时（网页手动上传靠人脑记清单，v2.1.20 曾漏），
+     * 仓库文件因走 git 提交几乎不可能漏，用它兜住检查链路，避免落回被限流的 API。
+     */
+    private const val RAW_VERSION_JSON_URL =
+        "https://github.com/$GITHUB_OWNER/$GITHUB_REPO/raw/main/$VERSION_JSON_NAME"
+
+    /** 镜像站普遍校验/拒绝无 UA 或 okhttp UA 的请求，统一伪装浏览器 UA */
+    private const val USER_AGENT =
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+
     private const val COOLDOWN_MS = 5_000L
     private const val TAG = "ApkUpdater"
     private const val UPDATE_DIR_NAME = "update"
 
+    /**
+     * GitHub release 资产下载镜像（国内加速；前缀拼接到原始直链前，如
+     * https://ghfast.top/https://github.com/.../xxx.apk）。GitHub 直连永远作为最后兜底。
+     * 2026-10-29 真实 APK 直连实测三轮：ghfast(~2MB/s 稳)、gh.ddlc.top(~2.7MB/s)为
+     * 第一梯队；ghproxy.net 慢(~300KB/s)但通；boki 抖动剧烈(2.4MB/s↔15KB/s)垫底。
+     * gh-proxy.com 持续 403、akams/dgithub/ygxz/99988866/gitmirror 等直连全灭，均不收。
+     * 镜像属公益服务，快慢随时间漂移，列表需定期复核（地址发布站：ghproxy.link）。
+     */
+    private val DOWNLOAD_MIRRORS = listOf(
+        "https://ghfast.top/",
+        "https://gh.ddlc.top/",
+        "https://ghproxy.net/",
+        "https://github.boki.moe/",
+    )
+
+    /** 下载候选 URL：GitHub 直链时镜像在前、直连兜底；非 GitHub 直链原样单候选。 */
+    private fun downloadCandidates(url: String): List<String> =
+        if (url.startsWith("https://github.com/")) {
+            DOWNLOAD_MIRRORS.map { it + url } + url
+        } else {
+            listOf(url)
+        }
     /** 启动自动检查的忽略版本：用户在自动弹窗点「稍后」后落盘，同版本不再自动弹 */
     const val KEY_IGNORED_VERSION = "update_ignored_version"
 
@@ -52,6 +91,15 @@ object ApkUpdater {
             .connectTimeout(12, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)
             .writeTimeout(60, TimeUnit.SECONDS)
+            .build()
+    }
+
+    /** 版本元数据（version.json）专用：小文件，紧超时让失败的镜像快速让位换源 */
+    private val metaOkHttpLazy: Lazy<OkHttpClient> = lazy {
+        OkHttpClient.Builder()
+            .dns(IPv4OnlyDns)
+            .connectTimeout(6, TimeUnit.SECONDS)
+            .readTimeout(10, TimeUnit.SECONDS)
             .build()
     }
 
@@ -113,30 +161,100 @@ object ApkUpdater {
 
     suspend fun fetchLatestRelease(): ReleaseInfo {
         return withContext(Dispatchers.IO) {
-            var lastError: Throwable? = null
-            val maxAttempts = 3
-            for (attempt in 1..maxAttempts) {
-                ensureActive()
-                try {
-                    return@withContext fetchLatestReleaseOnce()
-                } catch (t: Throwable) {
-                    if (t is CancellationException) throw t
-                    lastError = t
-                    val shouldRetry =
-                        attempt < maxAttempts &&
-                            (t is IOException || t.message?.startsWith("HTTP ") == true)
-                    if (!shouldRetry) throw t
-                    delay((400L * attempt).milliseconds)
-                }
-            }
-            throw lastError ?: IllegalStateException("fetch latest release failed")
+            // 三级容错链：release 附件 version.json → 仓库 main 的 version.json → API 直连。
+            // 前两级走与 APK 下载同一套镜像链，不查 api.github.com（国内间歇可达 + 匿名
+            // 限流 60 次/小时/出口 IP，运营商 NAT 下容易 403），元数据与安装包同源同链路。
+            // API 仅兜存量远古 release（两条 version.json 都没有）与镜像全灭的极端场景。
+            fetchLatestViaVersionJson()?.let { return@withContext it }
+            fetchLatestViaApi()
         }
     }
 
-    private fun fetchLatestReleaseOnce(): ReleaseInfo {
+    /** latest release 不携带 version.json（404 透传）时无需再试其他镜像——同一 origin 结果一致 */
+    private class VersionJsonAbsentException(url: String) : IOException("version.json absent: $url")
+
+    private suspend fun fetchLatestViaVersionJson(): ReleaseInfo? {
+        // 一级：latest release 附件。404=该 release 未携带，换镜像结果一致直接降级；
+        // 不再直接落 API——API 匿名限流国内常态 403，落它身上检查必挂。
+        fetchVersionJsonViaCandidates(VERSION_JSON_URL, "release")?.let { return it }
+        // 二级容错：仓库 main 的 version.json。覆盖「三件套已提交但网页漏传附件」
+        // 的事故窗口。注意 raw 文件可能略领先 release（提交后、发 Release 前的几分钟），
+        // 极端时提示有新版但 latest/download/<apk> 尚 404 下载失败——窗口极小，可接受。
+        return fetchVersionJsonViaCandidates(RAW_VERSION_JSON_URL, "repo raw")
+    }
+
+    private suspend fun fetchVersionJsonViaCandidates(url: String, sourceLabel: String): ReleaseInfo? {
+        val candidates = downloadCandidates(url)
+        for (candidate in candidates) {
+            currentCoroutineContext().ensureActive()
+            try {
+                return parseVersionJson(fetchText(candidate))
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                if (t is VersionJsonAbsentException) {
+                    AppLog.i(TAG, "$sourceLabel has no version.json, give up this source")
+                    return null
+                }
+                AppLog.w(TAG, "version.json fetch failed via ${candidate.take(48)}: ${t.message}")
+            }
+        }
+        return null
+    }
+
+    private fun fetchText(url: String): String {
+        val req = Request.Builder()
+            .url(url)
+            .header("User-Agent", USER_AGENT)
+            .get()
+            .build()
+        metaOkHttpLazy.value.newCall(req).execute().use { r ->
+            if (r.code == 404) throw VersionJsonAbsentException(url)
+            check(r.isSuccessful) { "HTTP ${r.code} ${r.message}" }
+            return r.body?.string() ?: error("empty body")
+        }
+    }
+
+    private fun parseVersionJson(raw: String): ReleaseInfo {
+        val json = JSONObject(raw)
+        val versionName = json.optString("version", "").trim().removePrefix("v")
+        check(versionName.isNotBlank()) { "version.json version 为空" }
+        check(parseVersion(versionName) != null) { "版本号格式不正确：$versionName" }
+        val apkName = json.optString("apk", "").trim()
+        check(apkName.isNotBlank()) { "version.json apk 为空" }
+        // latest/download/<资产名>：version.json 与 APK 同属 latest release，无需感知 tag 名
+        val apkUrl = "https://github.com/$GITHUB_OWNER/$GITHUB_REPO/releases/latest/download/$apkName"
+        return ReleaseInfo(
+            versionName = versionName,
+            apkUrl = apkUrl,
+            releaseNotes = json.optString("notes", "").trim(),
+        )
+    }
+
+    private suspend fun fetchLatestViaApi(): ReleaseInfo {
+        var lastError: Throwable? = null
+        val maxAttempts = 3
+        for (attempt in 1..maxAttempts) {
+            currentCoroutineContext().ensureActive()
+            try {
+                return fetchLatestViaApiOnce()
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                lastError = t
+                val shouldRetry =
+                    attempt < maxAttempts &&
+                        (t is IOException || t.message?.startsWith("HTTP ") == true)
+                if (!shouldRetry) throw t
+                delay((400L * attempt).milliseconds)
+            }
+        }
+        throw lastError ?: IllegalStateException("fetch latest release failed")
+    }
+
+    private fun fetchLatestViaApiOnce(): ReleaseInfo {
         val req = Request.Builder()
             .url(RELEASE_API_URL)
             .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", USER_AGENT)
             .get()
             .build()
         val call = okHttp.newCall(req)
@@ -192,9 +310,33 @@ object ApkUpdater {
     }
 
     /**
-     * 启动时清理上一次会话遗留的安装包。下载→拉起安装器都在同一次会话内完成，
-     * 没有任何跨进程复用残留包的路径，残留在磁盘上只会白占缓存空间（几十 MB），
-     * 因此启动时整目录删除即可；下次下载会在同目录重建，不影响更新流程。
+     * 查找当前会话内已下载完成、且版本号与目标版本一致的本地安装包（供复用免重下）。
+     * 下载完成才会 rename 为 update.apk（中断只留 .part 文件），存在即完整；
+     * 再用 PackageManager 解析包内 versionName 比对，防止旧版本残留包被误用。
+     * 版本比对走 parseVersion 归一化：GitHub tag 带 v 前缀而 APK 内 versionName 不带，
+     * 裸字符串比对永远不命中。
+     */
+    fun findDownloadedApk(context: Context, versionName: String): File? {
+        val apk = File(File(context.cacheDir, UPDATE_DIR_NAME), "update.apk")
+        if (!apk.isFile || apk.length() == 0L) return null
+        val remote = parseVersion(versionName) ?: return null
+        val info = runCatching {
+            context.packageManager.getPackageArchiveInfo(apk.absolutePath, 0)
+        }.getOrNull()
+        val cached = info?.versionName?.let { parseVersion(it) }
+        if (cached != null && cached == remote) {
+            AppLog.i(TAG, "findDownloadedApk: reuse downloaded apk cached=${info.versionName} want=$versionName")
+            return apk
+        }
+        AppLog.i(TAG, "findDownloadedApk: no match, cached=${info?.versionName} want=$versionName")
+        return null
+    }
+
+    /**
+     * 启动时清理上一次会话遗留的安装包。复用（findDownloadedApk）只在同一会话内
+     * 发生（如安装界面被关掉后再次点下载），跨会话没有复用路径，残留包在磁盘上
+     * 只会白占缓存空间（几十 MB），因此启动时整目录删除即可；下次下载会在同目录
+     * 重建，不影响更新流程。
      */
     fun cleanupStaleDownload(context: Context) {
         Thread {
@@ -210,19 +352,23 @@ object ApkUpdater {
         url: String,
         onProgress: (Progress) -> Unit,
     ): File {
+        // 逐候选换源重试（镜像→…→直连）：国内访问 GitHub 直链经常龟速/失败，
+        // 换一个源远比对同一源干等重试有效。
+        val candidates = downloadCandidates(url)
         var lastError: Throwable? = null
-        val maxAttempts = 3
-        for (attempt in 1..maxAttempts) {
+        for ((index, candidate) in candidates.withIndex()) {
             currentCoroutineContext().ensureActive()
-            if (attempt == 1) onProgress(Progress.Connecting)
+            if (index == 0) onProgress(Progress.Connecting)
             try {
-                return downloadApkToCacheOnce(context, url, onProgress)
+                AppLog.i(TAG, "download attempt ${index + 1}/${candidates.size} via=${candidate.take(64)}")
+                return downloadApkToCacheOnce(context, candidate, onProgress)
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
                 lastError = t
-                if (attempt < maxAttempts) {
-                    onProgress(Progress.Retrying(attempt, maxAttempts))
-                    delay((1_500L * attempt).milliseconds)
+                AppLog.w(TAG, "download failed via ${candidate.take(64)}: ${t.message}")
+                if (index < candidates.lastIndex) {
+                    onProgress(Progress.Retrying(index + 1, candidates.size))
+                    delay(800L.milliseconds)
                 }
             }
         }
@@ -240,7 +386,11 @@ object ApkUpdater {
         runCatching { part.delete() }
         runCatching { target.delete() }
 
-        val req = Request.Builder().url(url).get().build()
+        val req = Request.Builder()
+            .url(url)
+            .header("User-Agent", USER_AGENT)
+            .get()
+            .build()
         val call = okHttp.newCall(req)
         val res = call.execute()
         res.use { r ->

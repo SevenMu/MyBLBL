@@ -74,7 +74,7 @@ jobs:
             echo "VERSION_CHANGED=false" >> $GITHUB_OUTPUT
           fi
 
-      - name: Build Release & Debug APK
+      - name: Build Release APK
         if: steps.check_version.outputs.VERSION_CHANGED == 'true'
         env:
           KEYSTORE_FILE: ${{ secrets.KEYSTORE_FILE }}
@@ -84,7 +84,7 @@ jobs:
         run: |
           KEYSTORE_PATH="$GITHUB_WORKSPACE/app/keystore.jks"
           printf '%s' "$KEYSTORE_FILE" | base64 -d > "$KEYSTORE_PATH"
-          ./gradlew assembleReleaseRenamed assembleDebugRenamed \
+          ./gradlew assembleReleaseRenamed \
             -Pandroid.injected.signing.store.file="$KEYSTORE_PATH" \
             -Pandroid.injected.signing.store.password=$KEYSTORE_PASSWORD \
             -Pandroid.injected.signing.key.alias=$KEY_ALIAS \

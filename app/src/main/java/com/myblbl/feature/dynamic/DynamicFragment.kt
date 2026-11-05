@@ -20,6 +20,7 @@ import com.myblbl.model.user.FollowingModel
 import com.myblbl.model.video.VideoModel
 import com.myblbl.network.session.SessionStateRepository
 import com.myblbl.core.ui.base.BaseFragment
+import com.myblbl.core.ui.base.OnBackPressedHandler
 import com.myblbl.core.ui.base.RecyclerViewPoolPrewarmer
 import com.myblbl.core.ui.base.VideoRecyclerViewTuning
 import com.myblbl.core.ui.base.adaptiveSpanCount
@@ -48,7 +49,7 @@ import kotlinx.coroutines.withContext
 import org.koin.android.ext.android.inject
 import org.koin.androidx.viewmodel.ext.android.viewModel
 
-class DynamicFragment : BaseFragment<FragmentDynamicBinding>(), MainTabFocusTarget, com.myblbl.ui.activity.MainActivity.OnVideoBlockedListener {
+class DynamicFragment : BaseFragment<FragmentDynamicBinding>(), MainTabFocusTarget, OnBackPressedHandler, com.myblbl.ui.activity.MainActivity.OnVideoBlockedListener {
     private enum class ContentFocusTarget {
         LEFT_UP_LIST,
         RIGHT_VIDEO_LIST
@@ -116,7 +117,8 @@ class DynamicFragment : BaseFragment<FragmentDynamicBinding>(), MainTabFocusTarg
                     preferredContentFocusTarget = ContentFocusTarget.LEFT_UP_LIST
                 }
             },
-            onLeftEdge = { (activity as? MainActivity)?.focusLeftFunctionArea() == true },
+            // 左栏 UP 列表左边缘：环绕回主边栏当前主 tab 对应按钮（「动态」），几何就近落点不保证
+            onLeftEdge = { (activity as? MainActivity)?.focusSidebarCurrentTab() == true },
             onRightEdge = { focusNearestVideoCard() },
         )
         binding.recyclerViewLeft.layoutManager = LinearLayoutManager(requireContext())
@@ -462,8 +464,11 @@ class DynamicFragment : BaseFragment<FragmentDynamicBinding>(), MainTabFocusTarg
                             }
 
                         MainNavigationViewModel.Event.MenuPressed -> {
-                            currentUpId = 0L
-                            loadData()
+                            // 不能走 loadData()：它最终调 selectUp 时不带 forceRefresh，
+                            // 会被"当前 UP 相同"防重(DynamicViewModel:244)和 videoCache
+                            // 回放双双拦截，静默不联网；必须走与下拉刷新同款的强制路径
+                            swipeRefreshLayout?.isRefreshing = true
+                            refreshCurrentVideoList()
                         }
 
                         MainNavigationViewModel.Event.BackPressed -> Unit
@@ -665,28 +670,14 @@ class DynamicFragment : BaseFragment<FragmentDynamicBinding>(), MainTabFocusTarg
 
     private fun focusPrimaryContent(anchorView: View?, preferSpatialEntry: Boolean): Boolean {
         if (preferSpatialEntry) {
-            if (anchorView != null) {
-                when {
-                    anchorView.isDescendantOf(binding.recyclerViewRight) -> {
-                        if (focusRightContent()) {
-                            return true
-                        }
-                    }
-
-                    anchorView.isDescendantOf(binding.recyclerViewLeft) -> {
-                        if (focusSelectedUpItem()) {
-                            return true
-                        }
-                    }
+            // 锚点在左 UP 列表（页内恢复）才回 UP 选中项；从侧栏按右进入
+            // 一律直接定位第一行第一个视频——不再对左列表做空间搜索，
+            // 否则焦点会先落在与侧栏按钮同一水平线的 UP 主项上（v2.1.14 反馈）
+            if (anchorView != null && anchorView.isDescendantOf(binding.recyclerViewLeft)) {
+                if (focusSelectedUpItem()) {
+                    return true
                 }
-            }
-            val handled = SpatialFocusNavigator.requestBestDescendant(
-                anchorView = anchorView,
-                root = binding.recyclerViewLeft,
-                direction = View.FOCUS_RIGHT,
-                fallback = null
-            )
-            if (handled) {
+            } else if (focusRightContent()) {
                 return true
             }
         }
@@ -716,6 +707,24 @@ class DynamicFragment : BaseFragment<FragmentDynamicBinding>(), MainTabFocusTarg
 
     override fun focusEntryFromMainTab(): Boolean {
         return focusEntryFromMainTab(anchorView = null, preferSpatialEntry = false)
+    }
+
+    /**
+     * BACK 分层（对齐主页 内容→二级导航→侧栏）：
+     * 视频网格 → 左侧 UP 列表选中项 → 主边栏当前 tab；
+     * 焦点已在本页外（如侧栏）→ 返回 false 交给 MainActivity 双击退出。
+     */
+    override fun onBackPressed(): Boolean {
+        if (view == null) {
+            return false
+        }
+        if (!binding.root.hasFocus()) {
+            return false
+        }
+        if (binding.recyclerViewRight.hasFocus() && focusSelectedUpItem()) {
+            return true
+        }
+        return (activity as? MainActivity)?.focusSidebarCurrentTab() == true
     }
 
     override fun focusEntryFromMainTab(anchorView: View?, preferSpatialEntry: Boolean): Boolean {

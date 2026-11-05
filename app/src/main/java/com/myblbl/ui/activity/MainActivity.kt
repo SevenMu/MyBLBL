@@ -1,5 +1,7 @@
 package com.myblbl.ui.activity
 
+import android.content.Context
+import android.content.Intent
 import android.os.Bundle
 import android.os.SystemClock
 import android.view.Choreographer
@@ -11,6 +13,9 @@ import androidx.annotation.OptIn
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.viewModels
 import androidx.fragment.app.Fragment
+import android.view.MotionEvent
+import android.view.inputmethod.InputMethodManager
+import android.widget.EditText
 import androidx.fragment.app.FragmentManager
 import androidx.fragment.app.FragmentTransaction
 import androidx.fragment.app.commit
@@ -28,10 +33,14 @@ import com.myblbl.repository.UserRepository
 import com.myblbl.core.ui.base.AppToast
 import com.myblbl.core.ui.base.BaseActivity
 import com.myblbl.core.ui.base.OnBackPressedHandler
+import com.myblbl.core.ui.base.UiScale
 import com.myblbl.model.user.UserDetailInfoModel
+import com.myblbl.model.video.VideoModel
+import com.myblbl.feature.cast.NvaCastController
 import com.myblbl.feature.category.CategoryFragment
 import com.myblbl.feature.cctv.CctvLiveFragment
 import com.myblbl.feature.cctv.vod.CctvVodFragment
+import com.myblbl.feature.detail.VideoDetailFragment
 import com.myblbl.feature.dynamic.DynamicFragment
 import com.myblbl.feature.home.HomeFragment
 import com.myblbl.feature.live.LiveFragment
@@ -68,15 +77,73 @@ class MainActivity : BaseActivity<ActivityMainBinding>(), TabBarView.OnTabClickL
         val viewRef: WeakReference<View>
     )
 
+    /**
+     * 触屏点输入框以外区域收起系统输入法，且这次点击不派发（用户约定：
+     * 键盘弹出时第一次点击专门用于收键盘，不触发任何功能——点热搜不搜索、
+     * 点按钮不执行；键盘收着时点击一切照旧）。必须放在 dispatchTouchEvent：
+     * 挂 OnTouchListener 只能收到落到空白的触摸。点输入框本身不收（继续编辑）。
+     * hide 返回 true=键盘正显示且已收起，此时消费事件；false=键盘未显示，正常派发。
+     */
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (ev.action == MotionEvent.ACTION_DOWN) {
+            val focused = currentFocus
+            if (focused is EditText && isImeVisible()) {
+                val location = IntArray(2)
+                focused.getLocationOnScreen(location)
+                val within = ev.rawX >= location[0] && ev.rawX <= location[0] + focused.width &&
+                    ev.rawY >= location[1] && ev.rawY <= location[1] + focused.height
+                if (!within) {
+                    val imm = getSystemService(INPUT_METHOD_SERVICE) as? InputMethodManager
+                    imm?.hideSoftInputFromWindow(focused.windowToken, 0)
+                    // hideSoftInputFromWindow 在键盘未显示时也返回 true，不能当显示依据
+                    return true
+                }
+            }
+        }
+        return super.dispatchTouchEvent(ev)
+    }
+
+    private fun isImeVisible(): Boolean {
+        val frame = android.graphics.Rect()
+        window.decorView.getWindowVisibleDisplayFrame(frame)
+        val height = resources.displayMetrics.heightPixels
+        return height - frame.height() > height * 0.15
+    }
+
     companion object {
         private const val SETTINGS_OVERLAY_TAG = "settings"
         private const val SETTINGS_OVERLAY_EXIT_ANIM_MS = 275L
         private const val CCTV_TAB_INDEX = 4
         private const val CCTV_VOD_TAB_INDEX = 5
         private const val SEARCH_TAB_INDEX = 7
+        private const val HOME_TAB_INDEX = 0
         private const val STARTUP_TAG = "AppStartup"
         private const val TEEN_REST_DIAG_TAG = "TeenRestDiag"
+        // 播放器等独立 Activity 长按菜单「视频详情」直达：宿主容器不可达时带参拉起主页
+        private const val EXTRA_DETAIL_AID = "extra_detail_aid"
+        private const val EXTRA_DETAIL_BVID = "extra_detail_bvid"
+
+        /**
+         * 从非 MainActivity 宿主（如播放页长按菜单）直达视频详情页：
+         * CLEAR_TOP+singleTop 复用栈底主页并替换掉其上的播放器，
+         * 主页 resume 后消费参数打开详情。无 aid 且无 bvid 时返回 false，
+         * 由调用方走原有兜底。
+         */
+        fun startWithVideoDetail(context: Context, video: VideoModel): Boolean {
+            if (video.aid <= 0L && video.bvid.isBlank()) return false
+            context.startActivity(
+                Intent(context, MainActivity::class.java)
+                    .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                    .putExtra(EXTRA_DETAIL_AID, video.aid)
+                    .putExtra(EXTRA_DETAIL_BVID, video.bvid)
+            )
+            return true
+        }
     }
+
+    // 外部 Activity 直达详情的待消费参数：onNewIntent/冷启动 intent 写入，resume 后消费
+    private var pendingDetailAid: Long = 0L
+    private var pendingDetailBvid: String? = null
 
     /** 青少年模式：休息遮罩倒计时 Handler，每秒刷新剩余时间。 */
     private val teenRestHandler = android.os.Handler(android.os.Looper.getMainLooper())
@@ -151,6 +218,11 @@ class MainActivity : BaseActivity<ActivityMainBinding>(), TabBarView.OnTabClickL
         }
         (application as? MyBLBLApplication)?.ensureSessionRuntimeReady("MainActivity.onCreate/sessionState")
         restoredFromSavedState = savedInstanceState != null
+        // 冷启动直达详情（主页被系统回收后经 CLEAR_TOP 重建的场景）；旋转重建不带旧参数
+        if (savedInstanceState == null) {
+            pendingDetailAid = intent.getLongExtra(EXTRA_DETAIL_AID, 0L)
+            pendingDetailBvid = intent.getStringExtra(EXTRA_DETAIL_BVID)
+        }
         val t0 = SystemClock.elapsedRealtime()
         super.onCreate(savedInstanceState)
         AppLog.i(STARTUP_TAG, "STARTUP super.onCreate elapsed=${SystemClock.elapsedRealtime() - t0}ms")
@@ -209,7 +281,22 @@ class MainActivity : BaseActivity<ActivityMainBinding>(), TabBarView.OnTabClickL
                 }
             }
         }
+        // 投屏服务在"退出应用"时会被显式关闭（onDestroy），进程仍存活时再次进入
+        // 主界面必须重新拉起，否则第二次打开 App 后手机上搜不到设备。install 内部幂等。
+        runCatching { NvaCastController.install(this) }
+            .onFailure { AppLog.w(STARTUP_TAG, "NVA cast restart failed", it) }
         AppLog.i(STARTUP_TAG, "STARTUP T1c MainActivity.onCreate end elapsed=${SystemClock.elapsedRealtime() - createStartMs}ms totalFromActivityMs=${SystemClock.elapsedRealtime() - activityCreateStartMs}ms")
+    }
+
+    override fun onDestroy() {
+        // 双击返回键退出应用时只会 finish Activity，进程仍留在缓存态。
+        // 投屏服务（SSDP 组播 + 9958 长连接）是纯线程常驻，不会随 Activity 结束而停止，
+        // 于是"退出"之后手机还能继续搜到并投屏。这里在真正的退出路径上显式关闭。
+        if (isFinishing && !isChangingConfigurations) {
+            runCatching { NvaCastController.get()?.shutdown() }
+                .onFailure { AppLog.w(STARTUP_TAG, "NVA cast shutdown failed", it) }
+        }
+        super.onDestroy()
     }
 
     override fun initView() {
@@ -315,7 +402,13 @@ class MainActivity : BaseActivity<ActivityMainBinding>(), TabBarView.OnTabClickL
         AppLog.i(STARTUP_TAG, "STARTUP attachInitialMainTab start index=$index elapsed=${startMs - activityCreateStartMs}ms")
         showFragment(index)
         postTabSelectedEvent(index)
-        AppLog.i(STARTUP_TAG, "STARTUP attachInitialMainTab end index=$index elapsed=${SystemClock.elapsedRealtime() - startMs}ms")
+        // 冷启动侧栏初始焦点落在当前默认 tab 按钮（主页/动态）上：不指定时系统默认
+        // 焦点给布局里第一个可聚焦视图=最顶部的搜索按钮，而搜索是低频入口（用户反馈）
+        binding.myTabView.post {
+            binding.myTabView.focusCurrentTab()
+            AppLog.i(STARTUP_TAG, "STARTUP sidebar initial focus index=$index")
+        }
+        AppLog.i(STARTUP_TAG, "STARTUP attachInitialMainTab end index=$index elapsed=${SystemClock.elapsedRealtime() - activityCreateStartMs}ms")
     }
 
     private fun restoreUiStateAfterRecreation() {
@@ -448,6 +541,7 @@ class MainActivity : BaseActivity<ActivityMainBinding>(), TabBarView.OnTabClickL
 
     override fun onTabSelected(index: Int) {
         AppLog.d("FocusTrace", "onTabSelected index=$index focusedBefore=${currentFocus?.javaClass?.simpleName}#${currentFocus?.id}")
+        UiScale.probe("mainTab:$index", this)
         // CCTV 直播 tab：直接进 Marmot 播放器，不加载频道列表 Fragment（对标参考 StartActivity→LiveActivity）
         if (index == CCTV_TAB_INDEX) {
             pendingFocusRestoreAfterExternalReturn = true
@@ -717,7 +811,6 @@ class MainActivity : BaseActivity<ActivityMainBinding>(), TabBarView.OnTabClickL
             UpdateFlowDialog.showConfirmDialog(
                 context = this@MainActivity,
                 releaseInfo = releaseInfo,
-                scope = lifecycleScope,
                 cancelTextRes = R.string.update_later,
                 onDismissedWithoutDownload = {
                     appSettings.putStringAsync(ApkUpdater.KEY_IGNORED_VERSION, releaseInfo.versionName)
@@ -764,6 +857,13 @@ class MainActivity : BaseActivity<ActivityMainBinding>(), TabBarView.OnTabClickL
 
         mainNavigationViewModel.dispatch(MainNavigationViewModel.Event.BackPressed)
 
+        // 退出前先回主页：遥控只把焦点放到主页按钮（不切页，详情页栈留着）；
+        // 触屏没有焦点可停，直接切到主页。再按一次才是真正退出。
+        if (returnToHomeBeforeExit()) {
+            exitTime = 0L
+            return
+        }
+
         if (System.currentTimeMillis() - exitTime <= exitInterval) {
             finish()
             return
@@ -772,6 +872,29 @@ class MainActivity : BaseActivity<ActivityMainBinding>(), TabBarView.OnTabClickL
         exitTime = System.currentTimeMillis()
         AppToast.show(this, getString(R.string.app_exit))
         schedulePostBackFocusRestore()
+    }
+
+    /**
+     * 退出链的最后一步。侧栏已经停在主页上时返回 false，交给双击退出；
+     * 否则遥控聚焦主页按钮、触屏切到主页，本次返回不算退出。
+     */
+    private fun returnToHomeBeforeExit(): Boolean {
+        if (binding.myTabView.visibility != View.VISIBLE) {
+            return false
+        }
+        if (binding.myTabView.isHomeTabFocused()) {
+            return false
+        }
+        if (binding.myTabView.isInTouchMode) {
+            if (binding.myTabView.isHomeTabSelected()) {
+                return false
+            }
+            // 走 selectTab 而非直接回调 onTabSelected：前者才会更新侧栏 currentSelectedIndex
+            // 与高亮，否则下次返回时 isHomeTabSelected() 读到旧值，退出链永远卡在这一步。
+            binding.myTabView.selectTab(HOME_TAB_INDEX)
+            return true
+        }
+        return binding.myTabView.focusHomeTab()
     }
 
     private fun schedulePostBackFocusRestore() {
@@ -1037,6 +1160,35 @@ class MainActivity : BaseActivity<ActivityMainBinding>(), TabBarView.OnTabClickL
     override fun onSaveInstanceState(outState: Bundle) {
         mainNavigationViewModel.onTabSelected(currentFragmentIndex)
         super.onSaveInstanceState(outState)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        pendingDetailAid = intent.getLongExtra(EXTRA_DETAIL_AID, 0L)
+        pendingDetailBvid = intent.getStringExtra(EXTRA_DETAIL_BVID)
+    }
+
+    override fun onResumeFragments() {
+        super.onResumeFragments()
+        consumePendingDetailRoute()
+    }
+
+    /**
+     * 消费外部 Activity（播放页长按菜单「视频详情」）的待处理路由：
+     * fragment manager 就绪后打开详情页；无参数时零开销直接返回。
+     */
+    private fun consumePendingDetailRoute() {
+        val aid = pendingDetailAid
+        val bvid = pendingDetailBvid
+        if (aid <= 0L && bvid.isNullOrBlank()) return
+        pendingDetailAid = 0L
+        pendingDetailBvid = null
+        AppLog.d("VideoRouteNav", "host resume open detail: aid=$aid, bvid=$bvid")
+        val fragment = when {
+            aid > 0L -> VideoDetailFragment.newInstance(aid)
+            else -> VideoDetailFragment.newInstance(bvid ?: return)
+        }
+        openInHostContainer(fragment)
     }
 
     override fun onResume() {

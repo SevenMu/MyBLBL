@@ -243,7 +243,10 @@ class CctvVodFragment : BaseFragment<FragmentCctvVodBinding>(),
         })
         binding.tabSource.enableDirectTabNavigation(
             onNavigateDown = {
-                focusPrimaryCard()
+                // tab DOWN 就近聚焦可见第一项，不回顶：原实现复用 focusPrimaryCard
+                // 的 scrollToPosition(0)，列表滚到任意位置时 UP 回 tab 再 DOWN
+                // 会整页瞬移回顶（v2.1.14 反馈）
+                focusNearestVisibleCard()
                 true
             },
             onNavigateUp = { focusFilterRow() },
@@ -621,6 +624,29 @@ class CctvVodFragment : BaseFragment<FragmentCctvVodBinding>(),
         return true
     }
 
+    /** tab DOWN 落点：就近聚焦当前可见第一项，列表滚动位置保持不动。 */
+    private fun focusNearestVisibleCard(): Boolean {
+        if (adapter.contentCount() == 0) return false
+        val layoutManager = binding.recyclerView.layoutManager as? LinearLayoutManager
+            ?: return focusPrimaryCard()
+        val firstVisible = layoutManager.findFirstVisibleItemPosition()
+        if (firstVisible != RecyclerView.NO_POSITION) {
+            layoutManager.findViewByPosition(firstVisible)?.let { visible ->
+                if (visible.requestFocus()) return true
+            }
+        }
+        // 布局未就绪兜底：布局完成后取可见第一项聚焦
+        binding.recyclerView.post {
+            if (!isAdded) return@post
+            val lm = binding.recyclerView.layoutManager as? LinearLayoutManager ?: return@post
+            val pos = lm.findFirstVisibleItemPosition()
+            if (pos != RecyclerView.NO_POSITION) {
+                lm.findViewByPosition(pos)?.requestFocus()
+            }
+        }
+        return true
+    }
+
     /**
      * 从播放页返回时把焦点放回进入前那张卡片：否则焦点会落在侧边栏或列表首项，
      * 用户要继续挑下一部得重新找位置。
@@ -656,10 +682,15 @@ class CctvVodFragment : BaseFragment<FragmentCctvVodBinding>(),
 
     override fun onBackPressed(): Boolean {
         val focused = view?.findFocus() ?: return false
-        if (isInsideRecyclerView(focused)) {
-            return focusCategoryRow()
+        // BACK 分层（用户 2.1.14 反馈）：内容区/子分类行/筛选行 → 先回「片库/收藏」
+        // 主 tab；已在主 tab 上 → 回侧栏。此前内容区直接落子分类（如「电视剧」）太深。
+        if (isInsideRecyclerView(focused) ||
+            categoryChips.any { it === focused } ||
+            filterChips.any { it === focused }
+        ) {
+            return focusSourceTabs() || mainActivity?.focusSidebarCurrentTab() == true
         }
-        if (categoryChips.any { it === focused } || filterChips.any { it === focused }) {
+        if (binding.tabSource.hasFocus()) {
             return mainActivity?.focusSidebarCurrentTab() == true
         }
         return false

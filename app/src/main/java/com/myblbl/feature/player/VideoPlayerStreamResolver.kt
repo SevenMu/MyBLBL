@@ -94,9 +94,7 @@ internal class VideoPlayerStreamResolver(
             .filter { it.id == lockedQualityId }
         if (videosAtQuality.isEmpty()) return null
 
-        val selectedAudio = buildAudioTracks(playInfo)
-            .firstOrNull { it.id == selectedAudioId }
-            ?: buildAudioTracks(playInfo).maxByOrNull { it.bandwidth }
+        val selectedAudio = selectAudioTrack(playInfo, selectedAudioId)
         AppLog.i(TAG, "audio track selected: id=${selectedAudio?.id} name=${AudioQuality.fromId(selectedAudio?.id ?: 0).name} " +
             "mimeType=${selectedAudio?.realMimeType} codecs=${selectedAudio?.codecs} bandwidth=${selectedAudio?.bandwidth} " +
             "requestedId=$selectedAudioId fallback=${selectedAudio?.id != selectedAudioId}")
@@ -170,6 +168,14 @@ internal class VideoPlayerStreamResolver(
             )
         }
         if (routes.isEmpty()) return null
+        AppLog.i(
+            TAG,
+            "dash route plan: quality=$lockedQualityId preferred=$preferredCodec " +
+                "routes=${routes.joinToString(" > ") {
+                    "${it.codec}(${it.videoRepresentation.width}x${it.videoRepresentation.height} " +
+                        "${it.videoRepresentation.bandwidth / 1000000}Mbps)"
+                }}"
+        )
         return DashRoutePlan(
             qualityId = lockedQualityId,
             selectedAudioId = selectedAudio?.id ?: selectedAudioId,
@@ -230,10 +236,7 @@ internal class VideoPlayerStreamResolver(
         if (options.none { it.qn == initialQualityId && it.codec == resolvedInitialCodec }) return null
 
         // 音轨选择与 resolveDashRoutePlan 保持一致：请求 id 优先，缺省取最高带宽。
-        val selectedAudio = buildAudioTracks(playInfo)
-            .firstOrNull { it.id == selectedAudioId }
-            ?: buildAudioTracks(playInfo).maxByOrNull { it.bandwidth }
-            ?: return null
+        val selectedAudio = selectAudioTrack(playInfo, selectedAudioId) ?: return null
         val audioUrls = CdnLatencyProfile.sortUrlsByLatency(
             buildDistinctUrls(selectedAudio.realBaseUrl, selectedAudio.realBackupUrl)
         )
@@ -284,6 +287,14 @@ internal class VideoPlayerStreamResolver(
             hardwareSupportedCodecs = hardwareSupportedCodecs
         )
         val resolvedCodec = codecs.firstOrNull()
+        // 诊断锚点：设置默认编码"不起作用"类问题的判定入口——三值同看：
+        // 入参 preferredCodec（意图）、codecs（排序结果）、resolvedCodec（实际生效）。
+        // preferredCodec=HEVC 而 resolvedCodec=AV1 即排序层翻转（对照 hardwareSupportedCodecs）。
+        AppLog.i(
+            TAG,
+            "resolveSelections: preferredCodec=$preferredCodec quality=$resolvedQualityId " +
+                "hw=$hardwareSupportedCodecs codecs=$codecs resolved=$resolvedCodec"
+        )
         return SelectionSnapshot(
             qualities = qualities,
             selectedQualityId = resolvedQualityId,
@@ -336,7 +347,21 @@ internal class VideoPlayerStreamResolver(
                 .orEmpty()
         }
 
-        return streamQualities.sortedWith(
+        // 官方对齐的设备能力过滤：无杜比视界解码器的设备不展示 126 档（官方 app 同款
+        // 行为——本机解不了 DV 元数据，该档只能按普通 HEVC 播且永不点亮，展示只会带来
+        // 「为什么选了杜比视界没效果」的困惑）。电视等有 DV 解码器的设备不受影响。
+        val deviceFiltered = streamQualities.filter { quality ->
+            quality.id != VideoQuality.QUALITY_DOLBY_VISION.id ||
+                VideoCodecSupport.isDolbyVisionSupported()
+        }
+        if (deviceFiltered.size != streamQualities.size) {
+            AppLog.i(
+                TAG,
+                "quality list filtered: dolby vision not decodable on device, " +
+                    "before=${streamQualities.map { it.id }} after=${deviceFiltered.map { it.id }}"
+            )
+        }
+        return deviceFiltered.sortedWith(
             compareBy<VideoQuality> {
                 qualityOrder.indexOf(it.id).takeIf { index -> index >= 0 } ?: Int.MAX_VALUE
             }.thenByDescending { it.id }
@@ -424,9 +449,7 @@ internal class VideoPlayerStreamResolver(
                 .maxByOrNull { it.bandwidth }
                 ?: filteredByQuality.maxByOrNull { it.bandwidth }
                 ?: return null
-            val selectedAudio = buildAudioTracks(playInfo)
-                .firstOrNull { it.id == selectedAudioId }
-                ?: buildAudioTracks(playInfo).maxByOrNull { it.bandwidth }
+            val selectedAudio = selectAudioTrack(playInfo, selectedAudioId)
             AppLog.i(TAG, "buildMediaSource audio: id=${selectedAudio?.id} mimeType=${selectedAudio?.realMimeType} " +
                 "codecs=${selectedAudio?.codecs} bandwidth=${selectedAudio?.bandwidth}")
             val videoUrls = CdnLatencyProfile.sortUrlsByLatency(
@@ -528,9 +551,7 @@ internal class VideoPlayerStreamResolver(
             return null
         }
 
-        val selectedAudio = buildAudioTracks(playInfo)
-            .firstOrNull { it.id == selectedAudioId }
-            ?: buildAudioTracks(playInfo).maxByOrNull { it.bandwidth }
+        val selectedAudio = selectAudioTrack(playInfo, selectedAudioId)
         val audioUrls = selectedAudio
             ?.let { buildDistinctUrls(it.realBaseUrl, it.realBackupUrl) }
             .orEmpty()
@@ -597,6 +618,30 @@ internal class VideoPlayerStreamResolver(
         }
         return audios.maxByOrNull { it.bandwidth }?.id
             ?: audios.firstOrNull()?.id
+    }
+
+    /**
+     * 音轨选择（DASH/seamless/progressive 各路径共用）：请求 id 优先，缺省取最高带宽。
+     *
+     * 无声档过滤：本机无 AC-3 解码器时杜比全景声轨（30250）解不了，media3 对解不了
+     * 的音频轨跳轨不报错，选了就是「视频正常但无声」（华为真机实测切档后 audio
+     * decoder init 一次都不出现）。这里统一排除，偏好该档的用户回落到剩余最高带宽轨
+     * （Hi-Res/192K AAC）。
+     */
+    private fun selectAudioTrack(playInfo: PlayInfoModel, selectedAudioId: Int?): DashAudio? {
+        val tracks = buildAudioTracks(playInfo)
+        val playableTracks = tracks.filter { track ->
+            track.id != AudioQuality.AUDIO_DOLBY.id || VideoCodecSupport.isDolbyAtmosTrackPlayable()
+        }
+        if (playableTracks.size != tracks.size) {
+            AppLog.i(
+                TAG,
+                "audio track filtered: dolby atmos not decodable on device, " +
+                    "tracks=${tracks.map { it.id }} playable=${playableTracks.map { it.id }}"
+            )
+        }
+        return playableTracks.firstOrNull { it.id == selectedAudioId }
+            ?: playableTracks.maxByOrNull { it.bandwidth }
     }
 
     private fun buildAudioTracks(playInfo: PlayInfoModel): List<DashAudio> {

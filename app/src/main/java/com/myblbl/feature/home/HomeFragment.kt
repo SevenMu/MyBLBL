@@ -19,16 +19,18 @@ import com.myblbl.ui.activity.MainActivity
 import com.myblbl.ui.fragment.main.MainNavigationViewModel
 import com.myblbl.ui.fragment.main.MainTabFocusTarget
 import com.myblbl.core.ui.base.OnBackPressedHandler
+import com.myblbl.core.ui.base.UiScale
 import com.myblbl.core.ui.tab.enableTouchNavigation
 import com.myblbl.core.ui.tab.focusNearestTabTo
 import com.myblbl.core.ui.tab.focusSelectedTab
 import com.myblbl.core.ui.tab.disableAdjacentPagePrefetch
 import com.myblbl.core.ui.tab.retainAllPagesAfterFirstLayout
 import com.myblbl.core.ui.focus.SpatialFocusNavigator
-import com.myblbl.core.common.ext.getHomeDefaultStartPageIndex
+import com.myblbl.core.ui.focus.EdgeTabSwitch
 import com.myblbl.core.common.settings.AppSettingsDataStore
-import com.myblbl.event.AppEventHub
+import com.myblbl.core.common.ext.getHomeDefaultStartPageIndex
 import com.myblbl.core.common.log.AppLog
+import com.myblbl.event.AppEventHub
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import org.koin.android.ext.android.inject
@@ -106,6 +108,7 @@ class HomeFragment : Fragment(), MainTabFocusTarget, OnBackPressedHandler {
         }.also { binding.tabLayout.addOnTabSelectedListener(it) }
         pageChangeCallback = object : ViewPager2.OnPageChangeCallback() {
             override fun onPageSelected(position: Int) {
+                context?.let { UiScale.probe("pageSelected:$position", it) }
                 notifyTabSelected(position)
             }
         }.also { callback ->
@@ -231,6 +234,14 @@ class HomeFragment : Fragment(), MainTabFocusTarget, OnBackPressedHandler {
      */
     fun switchAdjacentTabFromContentEdge(delta: Int): Boolean {
         val currentBinding = _binding ?: return false
+        // 设置「卡片边缘切换标签」关闭：只关「切 tab」——左边缘环绕回主边栏
+        // 当前主 tab 对应按钮；右边缘吞键停原地（对齐 blbl 右边缘无外流）
+        if (!EdgeTabSwitch.enabled(appSettings)) {
+            if (delta < 0) {
+                return (activity as? MainActivity)?.focusSidebarCurrentTab() == true
+            }
+            return true
+        }
         val target = currentBinding.viewPager.currentItem + delta
         if (target < 0) {
             return focusLeftFunctionArea()

@@ -2,6 +2,7 @@ package com.myblbl.ui.adapter
 
 import android.graphics.Color
 import android.graphics.Outline
+import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -12,6 +13,9 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.ListAdapter
 import androidx.recyclerview.widget.RecyclerView
 import com.myblbl.R
+import com.myblbl.core.ui.focus.tv.LinearTvFocusStrategy
+import com.myblbl.core.ui.focus.tv.TvFocusableAdapter
+import com.myblbl.core.ui.focus.tv.TvListFocusController
 import com.myblbl.databinding.CellEpisodeBinding
 import com.myblbl.databinding.CellSeriesHeadBinding
 import com.myblbl.databinding.CellSeriesLaneBinding
@@ -42,7 +46,8 @@ class SeriesDetailContentAdapter(
         ) : Row
 
         data class Episodes(
-            val items: List<EpisodeModel>
+            val items: List<EpisodeModel>,
+            val currentEpId: Long = 0L
         ) : Row
 
         data class Section(
@@ -147,7 +152,7 @@ class SeriesDetailContentAdapter(
     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
         when (val row = getItem(position)) {
             is Row.Header -> (holder as HeaderViewHolder).bind(row.detail, row.followed)
-            is Row.Episodes -> (holder as EpisodeLaneViewHolder).bind(row.items)
+            is Row.Episodes -> (holder as EpisodeLaneViewHolder).bind(row.items, row.currentEpId)
             is Row.Section -> (holder as SectionLaneViewHolder).bind(row.section)
             is Row.Seasons -> (holder as SeasonLaneViewHolder).bind(row.title, row.items)
             is Row.Recommend -> (holder as RecommendLaneViewHolder).bind(row.items)
@@ -301,6 +306,7 @@ class SeriesDetailContentAdapter(
         onEpisodeClick: (EpisodeModel) -> Unit
     ) : RecyclerView.ViewHolder(binding.root) {
 
+        private var tvFocusController: TvListFocusController? = null
         private val adapter = EpisodeAdapter(
             onEpisodeClick = onEpisodeClick,
             onEpisodeFocused = ::onRowContentFocused,
@@ -313,10 +319,25 @@ class SeriesDetailContentAdapter(
                 } else {
                     onContentVerticalKey?.invoke(view, keyCode) == true
                 }
+            },
+            onItemFocusedWithView = { view, position ->
+                tvFocusController?.onItemFocused(view, position)
+            },
+            onItemDpad = { view, keyCode, event ->
+                val controller = tvFocusController
+                when {
+                    controller == null -> false
+                    controller.handleKey(view, keyCode, event) -> true
+                    // 行边界：左右键都吞掉，防止系统 focusSearch 把焦点甩到其他地方
+                    // （实测放行后正片首卡 LEFT 直跳页面左上角返回按钮——排序按钮在
+                    // 卡片上方不在左边，focusSearch 找不到它）。排序按钮走 UP 直达，换行走上下键。
+                    else -> true
+                }
             }
         )
         private var inReverseOrder = false
         private var items: List<EpisodeModel> = emptyList()
+        private var currentEpId: Long = 0L
         private var orderButtonFocused = false
 
         init {
@@ -324,11 +345,24 @@ class SeriesDetailContentAdapter(
                 LinearLayoutManager(binding.root.context, RecyclerView.HORIZONTAL, false)
             binding.recyclerView.adapter = adapter
             binding.recyclerView.isNestedScrollingEnabled = false
+            // 高频左右键下系统 focusSearch 会与平滑滚动动画竞态导致焦点回跳/跨行
+            // （实测 38 话列表连发右键出现 32→30 回跳并跳进预告行），
+            // 交给 TvListFocusController 按 position 步进（UGC 详情页合集列表同款）
+            tvFocusController = TvListFocusController(
+                recyclerView = binding.recyclerView,
+                adapter = adapter,
+                strategy = LinearTvFocusStrategy(RecyclerView.HORIZONTAL),
+                canLoadMore = { false },
+                loadMore = {},
+                restoreAppendFocusFromOutside = true,
+                restoreFocusOnFocusedDetach = true,
+                debugName = "series-episode"
+            )
             binding.buttonOrder.visibility = View.VISIBLE
             binding.textOrder.setText(R.string.positive_sequence)
             binding.buttonOrder.setOnClickListener {
                 inReverseOrder = !inReverseOrder
-                submitOrderedItems()
+                submitOrderedItems(locateCurrent = false)
                 binding.textOrder.setText(
                     if (inReverseOrder) R.string.negative_sequence else R.string.positive_sequence
                 )
@@ -355,10 +389,13 @@ class SeriesDetailContentAdapter(
             }
         }
 
-        fun bind(items: List<EpisodeModel>) {
+        fun bind(items: List<EpisodeModel>, currentEpId: Long) {
             binding.topTitle.setText(R.string.episodes)
             this.items = items
-            inReverseOrder = true
+            this.currentEpId = currentEpId
+            // 有观看记录→默认倒序（最新一集排最前，追番时少翻列表直接到最新进度）；
+            // 没看过→正序从第 1 集开始
+            inReverseOrder = currentEpId > 0L
             binding.buttonOrder.visibility = if (items.size > 1) View.VISIBLE else View.GONE
             if (binding.buttonOrder.visibility != View.VISIBLE) {
                 orderButtonFocused = false
@@ -367,15 +404,43 @@ class SeriesDetailContentAdapter(
         }
 
         private fun bindEpisodes() {
-            submitOrderedItems()
-            binding.textOrder.setText(R.string.negative_sequence)
+            submitOrderedItems(locateCurrent = true)
+            binding.textOrder.setText(
+                if (inReverseOrder) R.string.negative_sequence else R.string.positive_sequence
+            )
         }
 
         // 倒序通过提交反转列表实现：reverseLayout 会让铺不满一行的内容整体靠右
-        private fun submitOrderedItems() {
-            adapter.submitList(if (inReverseOrder) items.asReversed() else items)
-            // 反序时列表已反转，最新一集位于第 0 位
-            binding.recyclerView.scrollToPosition(0)
+        private fun submitOrderedItems(locateCurrent: Boolean) {
+            val ordered = if (inReverseOrder) items.asReversed() else items
+            adapter.currentEpId = currentEpId
+            // 滚动必须等 diff 提交后再执行：submitList 是异步的，提前滚会被
+            // 布局锚点保持带偏（切换排序后仍停在原 index 区间）
+            adapter.submitList(ordered) {
+                if (locateCurrent) {
+                    scrollToCurrentEpisode(ordered)
+                } else {
+                    // 手动切换排序：回列表开头（正序=第 1 集，倒序=最新一集）
+                    binding.recyclerView.scrollToPosition(0)
+                }
+            }
+        }
+
+        // 看过→定位上次看的那集（居中偏左，UGC 详情页合集列表同款）；
+        // 没看过/进度集不在列表→回到首位（正序=第 1 集，倒序=最新一集）
+        private fun scrollToCurrentEpisode(ordered: List<EpisodeModel>) {
+            val index = if (currentEpId > 0L) {
+                ordered.indexOfFirst { it.id == currentEpId }
+            } else {
+                -1
+            }
+            val llm = binding.recyclerView.layoutManager as? LinearLayoutManager ?: return
+            if (index > 0) {
+                val halfItemWidth = (ScreenUtils.getScreenWidth(binding.root.context) / 5) / 3
+                llm.scrollToPositionWithOffset(index - 1, -halfItemWidth)
+            } else {
+                llm.scrollToPosition(0)
+            }
         }
 
         fun requestStoredFocus(): Boolean {
@@ -402,10 +467,24 @@ class SeriesDetailContentAdapter(
         onItemClick: (VideoModel) -> Unit
     ) : RecyclerView.ViewHolder(binding.root) {
 
+        private var tvFocusController: TvListFocusController? = null
         private val adapter = SectionEpisodeAdapter(
             onItemClick = onItemClick,
             onItemFocused = ::onRowContentFocused,
-            onVerticalKey = onContentVerticalKey
+            onVerticalKey = onContentVerticalKey,
+            onItemFocusedWithView = { view, position ->
+                tvFocusController?.onItemFocused(view, position)
+            },
+            onItemDpad = { view, keyCode, event ->
+                val controller = tvFocusController
+                when {
+                    controller == null -> false
+                    controller.handleKey(view, keyCode, event) -> true
+                    // 行边界：左右键都吞掉，防止系统 focusSearch 把焦点甩到其他行
+                    // （预告行左右侧均无同行控件，放行必跨行）。换行走上下键。
+                    else -> true
+                }
+            }
         )
 
         init {
@@ -413,6 +492,16 @@ class SeriesDetailContentAdapter(
                 LinearLayoutManager(binding.root.context, RecyclerView.HORIZONTAL, false)
             binding.recyclerView.adapter = adapter
             binding.recyclerView.isNestedScrollingEnabled = false
+            tvFocusController = TvListFocusController(
+                recyclerView = binding.recyclerView,
+                adapter = adapter,
+                strategy = LinearTvFocusStrategy(RecyclerView.HORIZONTAL),
+                canLoadMore = { false },
+                loadMore = {},
+                restoreAppendFocusFromOutside = true,
+                restoreFocusOnFocusedDetach = true,
+                debugName = "series-section"
+            )
             binding.buttonOrder.visibility = View.GONE
         }
 
@@ -435,11 +524,24 @@ class SeriesDetailContentAdapter(
         onSeasonClick: (SeriesModel) -> Unit
     ) : RecyclerView.ViewHolder(binding.root) {
 
+        private var tvFocusController: TvListFocusController? = null
         private val adapter = SeriesAdapter(
             onItemClick = onSeasonClick,
             enableSidebarExit = false,
             onItemFocused = ::onRowContentFocused,
             onVerticalKey = onContentVerticalKey,
+            onItemFocusedWithView = { view, position ->
+                tvFocusController?.onItemFocused(view, position)
+            },
+            onItemDpad = { view, keyCode, event ->
+                val controller = tvFocusController
+                when {
+                    controller == null -> false
+                    controller.handleKey(view, keyCode, event) -> true
+                    // 行边界：左右键都吞掉，防止系统 focusSearch 把焦点甩到其他行。换行走上下键。
+                    else -> true
+                }
+            },
             cardWidth = ScreenUtils.getScreenWidth(binding.root.context) / 7
         )
 
@@ -448,6 +550,16 @@ class SeriesDetailContentAdapter(
                 LinearLayoutManager(binding.root.context, RecyclerView.HORIZONTAL, false)
             binding.recyclerView.adapter = adapter
             binding.recyclerView.isNestedScrollingEnabled = false
+            tvFocusController = TvListFocusController(
+                recyclerView = binding.recyclerView,
+                adapter = adapter,
+                strategy = LinearTvFocusStrategy(RecyclerView.HORIZONTAL),
+                canLoadMore = { false },
+                loadMore = {},
+                restoreAppendFocusFromOutside = true,
+                restoreFocusOnFocusedDetach = true,
+                debugName = "series-season"
+            )
             binding.buttonOrder.visibility = View.GONE
         }
 
@@ -474,11 +586,24 @@ class SeriesDetailContentAdapter(
         onSeasonClick: (SeriesModel) -> Unit
     ) : RecyclerView.ViewHolder(binding.root) {
 
+        private var tvFocusController: TvListFocusController? = null
         private val adapter = SeriesAdapter(
             onItemClick = onSeasonClick,
             enableSidebarExit = false,
             onItemFocused = ::onRowContentFocused,
             onVerticalKey = onContentVerticalKey,
+            onItemFocusedWithView = { view, position ->
+                tvFocusController?.onItemFocused(view, position)
+            },
+            onItemDpad = { view, keyCode, event ->
+                val controller = tvFocusController
+                when {
+                    controller == null -> false
+                    controller.handleKey(view, keyCode, event) -> true
+                    // 行边界：左右键都吞掉，防止系统 focusSearch 把焦点甩到其他行。换行走上下键。
+                    else -> true
+                }
+            },
             cardWidth = ScreenUtils.getScreenWidth(binding.root.context) / 7
         )
 
@@ -487,6 +612,16 @@ class SeriesDetailContentAdapter(
                 LinearLayoutManager(binding.root.context, RecyclerView.HORIZONTAL, false)
             binding.recyclerView.adapter = adapter
             binding.recyclerView.isNestedScrollingEnabled = false
+            tvFocusController = TvListFocusController(
+                recyclerView = binding.recyclerView,
+                adapter = adapter,
+                strategy = LinearTvFocusStrategy(RecyclerView.HORIZONTAL),
+                canLoadMore = { false },
+                loadMore = {},
+                restoreAppendFocusFromOutside = true,
+                restoreFocusOnFocusedDetach = true,
+                debugName = "series-recommend"
+            )
             binding.buttonOrder.visibility = View.GONE
         }
 
@@ -507,10 +642,50 @@ class SeriesDetailContentAdapter(
     private class SectionEpisodeAdapter(
         private val onItemClick: (VideoModel) -> Unit,
         private val onItemFocused: (() -> Unit)? = null,
-        private val onVerticalKey: ((View, Int) -> Boolean)? = null
-    ) : ListAdapter<VideoModel, SectionEpisodeAdapter.SectionEpisodeViewHolder>(VideoItemCallback) {
+        private val onVerticalKey: ((View, Int) -> Boolean)? = null,
+        onItemFocusedWithView: ((View, Int) -> Unit)? = null,
+        private val onItemDpad: ((View, Int, KeyEvent) -> Boolean)? = null
+    ) : ListAdapter<VideoModel, SectionEpisodeAdapter.SectionEpisodeViewHolder>(VideoItemCallback),
+        TvFocusableAdapter {
 
         private var focusedPosition = RecyclerView.NO_POSITION
+        private val itemFocusedWithView = onItemFocusedWithView
+
+        override fun focusableItemCount(): Int = itemCount
+
+        override fun stableKeyAt(position: Int): String? {
+            // PGC 预告/花絮不是普通视频，aid 可能为 0，用 cid 兜底防 key 全撞
+            val item = currentList.getOrNull(position) ?: return null
+            return when {
+                item.aid > 0 -> "sec:aid:${item.aid}"
+                item.cid > 0 -> "sec:cid:${item.cid}"
+                else -> "sec:pos:$position"
+            }
+        }
+
+        override fun findPositionByStableKey(key: String): Int {
+            return when {
+                key.startsWith("sec:aid:") -> {
+                    val id = key.removePrefix("sec:aid:").toLongOrNull()
+                        ?: return RecyclerView.NO_POSITION
+                    currentList.indexOfFirst { it.aid == id }
+                }
+
+                key.startsWith("sec:cid:") -> {
+                    val id = key.removePrefix("sec:cid:").toLongOrNull()
+                        ?: return RecyclerView.NO_POSITION
+                    currentList.indexOfFirst { it.cid == id }
+                }
+
+                key.startsWith("sec:pos:") -> {
+                    val pos = key.removePrefix("sec:pos:").toIntOrNull()
+                        ?: return RecyclerView.NO_POSITION
+                    if (pos in currentList.indices) pos else RecyclerView.NO_POSITION
+                }
+
+                else -> RecyclerView.NO_POSITION
+            }.takeIf { it >= 0 } ?: RecyclerView.NO_POSITION
+        }
 
         fun setItems(data: List<VideoModel>) {
             if (currentList == data) {
@@ -537,12 +712,14 @@ class SeriesDetailContentAdapter(
                 parent,
                 false
             )
-            return SectionEpisodeViewHolder(binding, onItemClick) { _ ->
+            return SectionEpisodeViewHolder(binding, onItemClick) { view ->
                 onItemFocused?.invoke()
             }.also { holder ->
                 holder.onVerticalKey = onVerticalKey
+                holder.onItemDpad = onItemDpad
                 holder.onFocusedViewChanged = { view ->
                     focusedPosition = recyclerPositionOf(view)
+                    itemFocusedWithView?.invoke(view, focusedPosition)
                 }
             }
         }
@@ -559,6 +736,7 @@ class SeriesDetailContentAdapter(
 
             private var currentItem: VideoModel? = null
             var onVerticalKey: ((View, Int) -> Boolean)? = null
+            var onItemDpad: ((View, Int, KeyEvent) -> Boolean)? = null
             var onFocusedViewChanged: ((View) -> Unit)? = null
 
             fun requestFocus(): Boolean = binding.clickView.requestFocus()
@@ -585,6 +763,11 @@ class SeriesDetailContentAdapter(
                         return@setOnKeyListener false
                     }
                     when (keyCode) {
+                        // 左右交给 TvListFocusController：按 position 步进，不受平滑滚动动画影响
+                        android.view.KeyEvent.KEYCODE_DPAD_LEFT,
+                        android.view.KeyEvent.KEYCODE_DPAD_RIGHT ->
+                            onItemDpad?.invoke(view, keyCode, event) == true
+
                         android.view.KeyEvent.KEYCODE_DPAD_UP,
                         android.view.KeyEvent.KEYCODE_DPAD_DOWN -> onVerticalKey?.invoke(view, keyCode) == true
                         else -> false
@@ -683,7 +866,7 @@ class SeriesDetailContentAdapter(
 
             detail.episodes.orEmpty()
                 .takeIf { it.isNotEmpty() }
-                ?.let { add(Row.Episodes(it)) }
+                ?.let { add(Row.Episodes(it, detail.userStatus?.progress?.lastEpId ?: 0L)) }
 
             detail.section.orEmpty()
                 .filter { it.episodes.isNotEmpty() }

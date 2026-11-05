@@ -3,6 +3,7 @@ package com.myblbl.repository.remote
 import com.myblbl.R
 import com.myblbl.MyBLBLApplication
 import com.myblbl.core.common.log.AppLog
+import com.myblbl.model.episode.EpisodeListMerge
 import com.myblbl.model.series.CheckUserSeriesResult
 import com.myblbl.model.series.EpisodesDetailModel
 import com.myblbl.model.series.FollowSeriesResult
@@ -60,7 +61,14 @@ class SeriesRepository(
                     rawSections
                 }
                 val mergedDetail = detail.copy(
-                    episodes = sectionResult?.mainSection?.episodes.orEmpty(),
+                    // 分区接口的正片不含「下一集预告」。连载中官方会把这一集预告
+                    // 接在最新正片后面（看剧进度也经常停在这集），episodes 只留它；
+                    // 已完结的历史预告仍走下面的预告分区，不混进正片行。
+                    episodes = EpisodeListMerge.mergeOngoingNextPreview(
+                        mainEpisodes = sectionResult?.mainSection?.episodes.orEmpty(),
+                        seasonEpisodes = detail.episodes.orEmpty(),
+                        isFinished = detail.publish?.isFinish == 1
+                    ),
                     section = enrichedSections,
                     mainSectionTitle = sectionResult?.mainSection?.title.orEmpty()
                 )

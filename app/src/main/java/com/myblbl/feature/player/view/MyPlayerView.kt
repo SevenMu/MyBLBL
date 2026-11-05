@@ -28,6 +28,7 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
+import android.widget.TextClock
 import android.widget.TextView
 import android.view.ViewStub
 import android.view.animation.DecelerateInterpolator
@@ -119,6 +120,8 @@ class MyPlayerView @JvmOverloads constructor(
         private const val MASK_GEOMETRY_LOG_INTERVAL_MS = 2_000L
         private const val RESUME_HINT_MARGIN_START_DP = 28
         private const val RESUME_HINT_MARGIN_BOTTOM_DP = 22
+        private const val QUALITY_SWITCHING_HINT_TIMEOUT_MS = 8000L
+        private const val QUALITY_SWITCHED_CONFIRM_MS = 3000L
         private const val RESUME_HINT_CONTROLLER_OFFSET_DP = 130
         private const val RESUME_HINT_ANIMATION_MS = 120L
 
@@ -152,6 +155,8 @@ class MyPlayerView @JvmOverloads constructor(
     private var pauseIndicatorView: View? = null
     private var resumeHintView: LinearLayout? = null
     private var resumeHintPositionText: TextView? = null
+    private var qualitySwitchingHideRunnable: Runnable? = null
+    private var qualitySwitchingTargetName: String? = null
 
     private var player: ExoPlayer? = null
     private var showBuffering: Int = SHOW_BUFFERING_WHEN_PLAYING
@@ -228,6 +233,7 @@ class MyPlayerView @JvmOverloads constructor(
             }
             updateContentDescription()
             updateResumeHintPosition(animate = true)
+            refreshAlwaysOnClock()
             controllerVisibilityListener?.onVisibilityChanged(visibility)
         }
     }
@@ -337,7 +343,10 @@ class MyPlayerView @JvmOverloads constructor(
     private val heldSeekKeyCodes = mutableSetOf<Int>()
     private var pendingExitSeekProgressOnly: Runnable? = null
     private var pendingHoldStartRunnable: Runnable? = null
-    private val holdStartDelayMs = 200L
+    // 短按/长按判定窗口，对齐 ViewConfiguration.getLongPressTimeout() 标准（400ms）。
+    // 原值 200ms 太短：遥控器正常短按常达 200~400ms，超时即误入长按 tick 模式，
+    // 表现为"短按跳 1~3 秒且弹中央大图标"（v2.1.14 用户反馈根因之一）。
+    private val holdStartDelayMs = 400L
 
     // --- SeekDiag: 诊断 seek 后画面卡死(纯观测,不改播放逻辑)---
     // 目标:坐实"async MediaCodec adapter flush 后丢失首帧回调"是不是根因。
@@ -388,6 +397,11 @@ class MyPlayerView @JvmOverloads constructor(
     // 非 1 倍速时也常驻显示。懒创建，与宿主同生命周期。
     private var speedBadgeView: TextView? = null
     private var persistentRateIndicatorEnabled = false
+
+    // 右上角常显时钟："时间常驻显示"开关打开时，控制栏隐藏期间常驻显示时间；
+    // 控制栏呼出时避让（控制栏顶栏自带时钟，视觉同位无缝切换）。懒创建。
+    private var alwaysOnClockView: TextClock? = null
+    private var alwaysOnClockEnabled = false
 
     // --- Timebar-focused seek state（blbl 模型：40ms 恒定 tick + 步长按片长自适应，长按走完全片时长恒定）---
     private var timebarSeekActive = false
@@ -1161,6 +1175,12 @@ class MyPlayerView @JvmOverloads constructor(
 
     fun isControllerFullyVisible(): Boolean = controller?.isFullyVisible() ?: false
 
+    /**
+     * 控制层是否有任何部分在屏（仅进度条态/隐藏动画未结束时为 true，完全隐藏为 false）。
+     * BACK 兜底用：部分可见时返回键应先收掉控制层，而不是穿透成退出播放器。
+     */
+    fun isControllerPartiallyVisible(): Boolean = controller?.visibility == View.VISIBLE
+
     fun isSettingViewShowing(): Boolean = settingView?.isShowing() ?: false
 
     fun removeControllerHideCallbacks() {
@@ -1169,6 +1189,11 @@ class MyPlayerView @JvmOverloads constructor(
 
     fun resetControllerHideCallbacks() {
         controller?.resetHideCallbacks()
+    }
+
+    /** 弹窗类面板打开期间挂起/恢复控制栏自动隐藏调度（转发至 LayoutManager）。 */
+    fun setControllerHideCallbacksSuspended(suspended: Boolean) {
+        controller?.setHideCallbacksSuspended(suspended)
     }
 
     private fun toggleControllerVisibility() {
@@ -1481,6 +1506,43 @@ class MyPlayerView @JvmOverloads constructor(
         refreshSpeedBadge()
     }
 
+    /** "时间常驻显示"设置入口：控制栏隐藏期间右上角常驻时钟。 */
+    fun showAlwaysOnClock(show: Boolean) {
+        alwaysOnClockEnabled = show
+        refreshAlwaysOnClock()
+    }
+
+    /** 常显时钟显隐统一入口：开关开且控制栏不可见时显示，控制栏呼出时避让。 */
+    private fun refreshAlwaysOnClock() {
+        val shouldShow = alwaysOnClockEnabled && controller?.visibility != View.VISIBLE
+        if (shouldShow) {
+            (alwaysOnClockView ?: createAlwaysOnClock().also { alwaysOnClockView = it }).visibility = VISIBLE
+        } else {
+            alwaysOnClockView?.visibility = GONE
+        }
+    }
+
+    /** 样式对齐控制栏顶栏时钟（text_clock：px50 粗体白字黑影），位置同右上角，格式走系统默认。 */
+    private fun createAlwaysOnClock(): TextClock {
+        val clock = TextClock(context).apply {
+            textSize = resources.getDimension(R.dimen.px50)
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
+            setTextColor(Color.WHITE)
+            setShadowLayer(7f, 0f, 0f, Color.BLACK)
+            visibility = GONE
+        }
+        addView(
+            clock,
+            LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT).apply {
+                gravity = Gravity.TOP or Gravity.END
+                topMargin = dp(10)
+                marginEnd = dp(25)
+            }
+        )
+        restoreOverlayZOrder()
+        return clock
+    }
+
     private fun createSpeedBadge(): TextView {
         val badge = AppCompatTextView(context).apply {
             text = "2x"
@@ -1610,6 +1672,10 @@ class MyPlayerView @JvmOverloads constructor(
         val dtDouble = gestureListener.isDoubleTapping
         AppLog.d("DpadCenter", "!ctrlVisible branch code=${event.keyCode} dtDouble=$dtDouble")
         if (!gestureListener.handleKeyDown(event) && !gestureListener.isDoubleTapping) {
+            if (event.keyCode == KeyEvent.KEYCODE_DPAD_UP && onEpisodePanelRequestListener != null) {
+                onEpisodePanelRequestListener?.invoke()
+                return
+            }
             maybeShowController(true)
             if (event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
                 event.keyCode == KeyEvent.KEYCODE_ENTER
@@ -1705,11 +1771,16 @@ class MyPlayerView @JvmOverloads constructor(
                 heldSeekKeyCodes.add(event.keyCode)
             }
             if (!session.isActive()) {
-                uiCoordinator?.transition(com.myblbl.feature.player.UiEvent.SeekTypeChanged(
-                    com.myblbl.feature.player.SeekType.HOLD))
+                // 必须先启动会话、成功后才 enterSeekProgressOnly：duration≤0/不可 seek
+                // （起播期、换线重建中）时 startHoldSeek 直接失败，若已进 progress-only
+                // 而会话未激活，松手收尾会被 isActive 守卫整体跳过，进度条将永久停留
+                // 在屏上（v2.1.13「调进度时进度条卡住不消失」根因）
+                session.startHoldSeek(forward)
+                if (!session.isActive()) {
+                    return true
+                }
                 controller?.enterSeekProgressOnly()
                 controller?.requestTimeBarFocus()
-                session.startHoldSeek(forward)
                 // Delay tick loop start so short press can be detected
                 cancelPendingHoldStart()
                 val startRunnable = Runnable {
@@ -1739,10 +1810,12 @@ class MyPlayerView @JvmOverloads constructor(
         } else if (event.action == KeyEvent.ACTION_UP) {
             heldSeekKeyCodes.remove(event.keyCode)
             if (heldSeekKeyCodes.isEmpty() && session.isActive()) {
-                val holdStarted = pendingHoldStartRunnable != null
                 cancelPendingHoldStart()
-                if (holdStarted) {
-                    // Short press: accumulate instead of immediate seek
+                if (!session.hasHoldProgress()) {
+                    // 短按：累积 ±10s 而不是立即 seek。除起表延迟未到外，还包括
+                    // holdStartDelayMs 已到、首个 40ms tick 未跑的零位移窗口——
+                    // 原实现此时按长按收尾、以进入位置提交，表现为"按了没反应
+                    // 根本跳不过去"（v2.1.14 用户反馈根因之二），统一回退短按。
                     handleTapAccumulate(forward)
                     session.resetSilently()
                 } else {
@@ -1942,8 +2015,11 @@ class MyPlayerView @JvmOverloads constructor(
             val holdStarted = pendingTimebarHoldStartRunnable != null
             cancelPendingTimebarHoldStart()
             cancelTimebarSeekLoop()
-            if (holdStarted) {
-                // Short press: 有章节时直接跨章跳转；无章节回落 ±10s 轻点累积
+            if (holdStarted || timebarSeekStartMs == 0L) {
+                // Short press: 有章节时直接跨章跳转；无章节回落 ±10s 轻点累积。
+                // timebarSeekStartMs==0 含起表已到、首个 40ms tick 未跑的零位移
+                // 窗口（原实现按长按以当前位置提交="跳不过去"），与 DPAD 路径
+                // 一致回退短按。
                 if (trySeekChapter(forward)) {
                     resetTapAccumulate()
                 } else {
@@ -1954,14 +2030,7 @@ class MyPlayerView @JvmOverloads constructor(
                 resetTapAccumulate()
                 val currentPlayer = player
                 if (timebarSeekActive && currentPlayer != null) {
-                    // startMs==0 说明 tick 循环从未初始化目标（首 tick 前松手，或起播
-                    // duration<=0 时 tick 全部早退），target 仍是 0 值，按 0 提交=跳回片头；
-                    // 落到当前位置，行为等同"没有拖动"
-                    val targetMs = if (timebarSeekStartMs == 0L) {
-                        currentPlayer.currentPosition
-                    } else {
-                        timebarSeekTargetMs
-                    }
+                    val targetMs = timebarSeekTargetMs
                     currentPlayer.seekTo(targetMs)
                     onUserSeekListener?.invoke(targetMs)
                     syncDanmakuPosition(targetMs, forceSeek = true)
@@ -2699,7 +2768,9 @@ class MyPlayerView @JvmOverloads constructor(
 
     /** 控制栏"播放速度"按键入口：打开设置面板的倍速子菜单。 */
     fun showPlaybackSpeedSettingView() {
-        controller?.rememberCurrentFocusTarget()
+        // 不按「当前焦点」记：触屏点倍速按钮时遥控器焦点还停在暂停，
+        // 关掉列表就会跳回暂停。这个入口固定记倍速按钮。
+        controller?.rememberPlaySpeedTarget()
         settingView?.showPlaybackSpeedMenu()
     }
 
@@ -2793,6 +2864,7 @@ class MyPlayerView @JvmOverloads constructor(
         pauseIndicatorView?.bringToFront()
         douyinPreviewLayer?.bringToFront()
         controllerLayer?.bringToFront()
+        alwaysOnClockView?.bringToFront()
         resumeHintView?.bringToFront()
         seekOverlayView?.bringToFront()
         settingView?.bringToFront()
@@ -2804,6 +2876,8 @@ class MyPlayerView @JvmOverloads constructor(
             pauseIndicatorView?.translationZ = 3f
             douyinPreviewLayer?.translationZ = 4f
             controllerLayer?.translationZ = 5f
+            // 常显时钟：控制栏层之上（控制栏可见时本就避让）、提示条/seek 层之下
+            alwaysOnClockView?.translationZ = 5.5f
             resumeHintView?.translationZ = 6f
             seekOverlayView?.translationZ = 7f
             settingView?.translationZ = 8f
@@ -2812,6 +2886,12 @@ class MyPlayerView @JvmOverloads constructor(
 
     fun showResumeHint(text: String) {
         val hintView = ensureResumeHintView()
+        // 若此前处于画质切换的单行模式，还原结构（动作按钮/点击语义）并取消其定时与 pending
+        qualitySwitchingHideRunnable?.let { removeCallbacks(it) }
+        qualitySwitchingHideRunnable = null
+        qualitySwitchingTargetName = null
+        hintView.getChildAt(1)?.visibility = VISIBLE
+        hintView.isClickable = true
         resumeHintPositionText?.text = text
         updateResumeHintPosition(animate = false)
         hintView.animate().cancel()
@@ -2826,6 +2906,67 @@ class MyPlayerView @JvmOverloads constructor(
             view.visibility = GONE
             view.alpha = 1f
         }
+    }
+
+    /**
+     * 画质切换提示（官方两段式，复用恢复播放进度提示条容器）：
+     * 1. 切换中：单行「正在为您切换到「XX」，请稍候…」，由宿主在发起切换时调用；
+     * 2. 切换完成：宿主的完成信号（渲染器格式回读/READY）调用 [hideQualitySwitchingHint]，
+     *    若仍有 pending 切换则转显「已切换至「XX」」3 秒后自动消失（官方截图同款）。
+     * 8 秒超时兜底直接消失（不显示完成确认）；播放出错走 [cancelQualitySwitchingHint]。
+     */
+    fun showQualitySwitchingHint(qualityName: String) {
+        qualitySwitchingTargetName = qualityName
+        val hint = ensureResumeHintView()
+        resumeHintPositionText?.text =
+            context.getString(R.string.player_quality_switching_hint, qualityName)
+        // 单行模式：隐藏右侧动作按钮、禁用点击（恢复进度模式的「点击从头播放」不适用）
+        hint.getChildAt(1)?.visibility = GONE
+        hint.isClickable = false
+        qualitySwitchingHideRunnable?.let { removeCallbacks(it) }
+        val hide = Runnable { cancelQualitySwitchingHint() }
+        qualitySwitchingHideRunnable = hide
+        postDelayed(hide, QUALITY_SWITCHING_HINT_TIMEOUT_MS)
+        hint.visibility = VISIBLE
+        updateResumeHintPosition(animate = false)
+        restoreOverlayZOrder()
+    }
+
+    /** 切换完成信号：pending 存在时转显「已切换至XX」确认 3 秒，否则纯还原（幂等）。 */
+    fun hideQualitySwitchingHint() {
+        val target = qualitySwitchingTargetName
+        if (target == null) {
+            // 确认提示展示期间（3 秒）的重复完成信号（如短暂缓冲后再次 READY）不打断展示；
+            // 无任何进行中的提示时还原结构（幂等，兼容起播时的首次格式回调）。
+            if (qualitySwitchingHideRunnable != null) return
+            restoreResumeHintStructureAndHide()
+            return
+        }
+        qualitySwitchingTargetName = null
+        qualitySwitchingHideRunnable?.let { removeCallbacks(it) }
+        val hint = ensureResumeHintView()
+        // 同一提示条原地换文案：快速切换（秒级完成）时「请稍候」立即被「已切换至」替换，无消失间隙
+        resumeHintPositionText?.text =
+            context.getString(R.string.player_quality_switched_hint, target)
+        val hide = Runnable { restoreResumeHintStructureAndHide() }
+        qualitySwitchingHideRunnable = hide
+        postDelayed(hide, QUALITY_SWITCHED_CONFIRM_MS)
+    }
+
+    /** 直接撤除（切换失败/出错路径）：不显示完成确认。 */
+    fun cancelQualitySwitchingHint() {
+        qualitySwitchingTargetName = null
+        qualitySwitchingHideRunnable?.let { removeCallbacks(it) }
+        qualitySwitchingHideRunnable = null
+        restoreResumeHintStructureAndHide()
+    }
+
+    private fun restoreResumeHintStructureAndHide() {
+        resumeHintView?.let { hint ->
+            hint.getChildAt(1)?.visibility = VISIBLE
+            hint.isClickable = true
+        }
+        hideResumeHint()
     }
 
     private fun ensureResumeHintView(): LinearLayout {
@@ -2959,6 +3100,12 @@ class MyPlayerView @JvmOverloads constructor(
     /** 焦点在进度条时按 OK：请求宿主打开章节选择弹窗（由 Activity/Fragment 设置）。 */
     var onChapterPanelRequestListener: (() -> Unit)? = null
 
+    /**
+     * 控制栏隐藏态按 UP：请求宿主打开选集/合集面板（高频入口，直达免去先呼控制栏）。
+     * 宿主未注册时回退为呼出控制栏；无选集时面板自身会 Toast 提示，按键始终有反馈。
+     */
+    var onEpisodePanelRequestListener: (() -> Unit)? = null
+
     fun showHideActionButton(show: Boolean) {
         pendingActionButtonVisible = show
         controller?.showHideActionButton(show)
@@ -2992,6 +3139,10 @@ class MyPlayerView @JvmOverloads constructor(
 
     fun rememberCurrentFocusTarget() {
         controller?.rememberCurrentFocusTarget()
+    }
+
+    fun rememberPlaySpeedTarget() {
+        controller?.rememberPlaySpeedTarget()
     }
 
     fun restoreRememberedFocus() {

@@ -34,6 +34,7 @@
     <string name="display_setting">Display</string>
     <string name="player_ui_setting">Player UI</string>
     <string name="about_setting">About</string>
+    <string name="tv_live_setting">Live TV</string>
     <!-- 设置分组标题 -->
     <string name="setting_group_browse">Browsing &amp; Entries</string>
     <string name="setting_group_interact">Interaction</string>
@@ -51,6 +52,8 @@
     <string name="setting_group_dm_style">Style</string>
     <string name="setting_group_dm_area">Screen Area</string>
     <string name="setting_group_dm_filter">Filtering</string>
+    <string name="setting_group_tv_live">Live TV</string>
+    <string name="setting_group_tv_vod">CCTV VOD</string>
     <string name="setting_group_teen_time">Time Limits</string>
     <string name="setting_group_teen_psas">PSA</string>
     <string name="setting_group_about_app">App</string>
@@ -82,6 +85,7 @@
     <string name="sc_switch">SuperChat toggle</string>
     <string name="dm_track_spacing">Danmaku line spacing</string>
     <string name="resume_playback">Resume playback</string>
+    <string name="skip_official_op_ed">Auto skip intro/outro</string>
     <string name="dm_text_size">Danmaku text size</string>
     <string name="ui_scale">UI scale</string>
     <string name="ui_text_size">UI text size</string>
@@ -152,12 +156,25 @@
     <string name="liked_">Liked</string>
     <string name="live">Live</string>
     <string name="live_entry">Live entry</string>
+    <string name="edge_tab_switch">Switch tabs at card edge</string>
     <string name="cctv_live">CCTV Live</string>
+    <string name="cctv_native_live">Live turbo mode</string>
+    <string name="cctv_native_vod">VOD turbo mode</string>
+    <string name="cctv_quality_auto">Auto</string>
+    <string name="cast_receive">Phone casting</string>
+    <string name="cast_device_name">Cast device name</string>
+    <string name="cast_device_name_hint">Shown in the bilibili app as 我的小电视 plus your suffix</string>
+    <string name="cast_device_name_hint_example">e.g. Living room</string>
+    <string name="cast_device_name_reset">Reset</string>
+    <string name="cast_device_name_empty">Device name cannot be empty</string>
+    <string name="cast_device_name_applied">Cast list will show: %1$s</string>
     <string name="cctv_live_subtitle">CCTV channel list</string>
     <string name="cctv_player_hint">Up/Down to switch channels · OK/tap to show controls · MENU for channel list</string>
     <string name="cctv_channel_select">Channels</string>
     <string name="channel">Channel</string>
     <string name="marmot_player_hint">Up/Down to switch channels · OK/tap to show controls · MENU for channel list</string>
+    <string name="marmot_stall_auto_recover">Stream stalled, auto refreshing…</string>
+    <string name="marmot_stall_give_up">Stream keeps stalling, please refresh or switch channel</string>
     <string name="cctv_quality">Quality</string>
     <string name="minor_protection">Teen protection</string>
     <string name="teen_mode">Teen mode</string>
@@ -246,6 +263,7 @@
     <string name="qwe_keyboard">Full keyboard</string>
     <string name="recent_update">Recently updated</string>
     <string name="recommend">Recommended</string>
+    <string name="detail_tab_collection_recommend">Series·Recommended</string>
     <string name="related_video">Related videos: </string>
     <string name="play_end_replay">Play again</string>
     <string name="play_end_related_title">Related</string>
@@ -258,7 +276,8 @@
     <string name="sign_in_qr_failed_title">Failed to load QR code</string>
     <string name="sign_in_qr_retry">Tap to retry</string>
     <string name="sign_in_qr_countdown_format">Expires in %1$s</string>
-    <string name="sign_in_qr_scanned">Scanned. Please confirm on your phone.</string>
+    <string name="sign_in_qr_scan_success">QR code scanned</string>
+    <string name="sign_in_qr_confirm_hint">Please confirm on your phone</string>
     <string name="sign_in_poll_network_error">Network unavailable. Sign-in cannot complete. Check your connection.</string>
     <string name="science">Science</string>
     <string name="screen_ratio">Screen scale</string>
@@ -276,6 +295,7 @@
     <string name="show_next_previous">Show next/previous video buttons</string>
     <string name="show_play_speed_button">Show playback speed button</string>
     <string name="show_playback_rate">Always show current speed</string>
+    <string name="show_always_on_clock">Always show clock</string>
     <string name="music_zone_normal_speed">Music videos at 1x by default</string>
     <string name="show_subtitle_default">Default subtitles</string>
     <string name="sign_out">Sign out</string>
@@ -403,6 +423,9 @@
     <string name="update_later">Later</string>
     <string name="session_expired_relogin">Login expired, please sign in again</string>
     <string name="update_downloading_title">Downloading update</string>
+    <string name="update_download_background">Download in background</string>
+    <string name="update_background_toast">Downloading in background. Installation will start automatically when ready</string>
+    <string name="update_in_progress_toast">Update package is downloading in background</string>
     <string name="connecting">Connecting…</string>
     <string name="retrying_format">Connection failed, retrying (%1$d/%2$d)…</string>
     <string name="net_timeout_toast">Network timed out, check the connection and retry</string>

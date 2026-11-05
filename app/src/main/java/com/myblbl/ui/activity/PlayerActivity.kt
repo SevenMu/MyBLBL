@@ -48,6 +48,10 @@ import com.myblbl.core.ui.base.ScaledTextView
 import com.myblbl.core.ui.system.ViewUtils
 import com.myblbl.databinding.FragmentVideoPlayerBinding
 import com.myblbl.event.AppEventHub
+import com.myblbl.feature.cast.NvaCastController
+import com.myblbl.feature.cast.NvaPlayerBridge
+import com.myblbl.feature.cast.NvaPlayerSnapshot
+import com.myblbl.feature.cast.NvaQnOption
 import com.myblbl.feature.player.PlayerInstancePool
 import com.myblbl.feature.player.PlaybackStartSeekResolver
 import com.myblbl.feature.player.PlaybackStartupTrace
@@ -105,6 +109,10 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
         private const val EXTRA_STARTUP_TRACE_START_MS = "player_startup_trace_start_ms"
         /** 青少年模式-公益广告锁死模式：屏蔽所有操作，播完自动退出。 */
         private const val EXTRA_PSAS_LOCKED = "player_psas_locked"
+        /** 期望清晰度 qn（手机投屏下发；0=无偏好，走默认清晰度设置）。 */
+        private const val EXTRA_DESIRED_QN = "player_desired_qn"
+        /** 本次播放来自手机投屏：跳过 tag 内容过滤拦截（视频是用户手机端主动选的）。 */
+        private const val EXTRA_FROM_CAST = "player_from_cast"
         private var pendingPlayQueue: List<VideoModel> = emptyList()
 
         fun start(
@@ -120,7 +128,9 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
             startEpisodeIndex: Int = -1,
             startupTraceId: String = PlaybackStartupTrace.NO_TRACE,
             startupTraceStartElapsedMs: Long = 0L,
-            psasLocked: Boolean = false
+            psasLocked: Boolean = false,
+            desiredQn: Int = 0,
+            fromCast: Boolean = false
         ) {
             val resolvedAid = aid.takeIf { it > 0L } ?: initialVideo?.aid ?: 0L
             val resolvedBvid = bvid.takeIf { it.isNotBlank() } ?: initialVideo?.bvid.orEmpty()
@@ -148,6 +158,8 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
                 putExtra(EXTRA_STARTUP_TRACE_ID, startupTraceId)
                 putExtra(EXTRA_STARTUP_TRACE_START_MS, startupTraceStartElapsedMs)
                 if (psasLocked) putExtra(EXTRA_PSAS_LOCKED, true)
+                if (desiredQn > 0) putExtra(EXTRA_DESIRED_QN, desiredQn)
+                if (fromCast) putExtra(EXTRA_FROM_CAST, true)
             }
             val options = ActivityOptionsCompat.makeCustomAnimation(
                 context, R.anim.slide_in_to_right, R.anim.slide_out_to_left
@@ -248,6 +260,86 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
     private var player: ExoPlayer? = null
     private val uiCoordinator = PlaybackUiCoordinator()
 
+    /**
+     * 投屏桥接：手机端哔哩必连指令翻译到本地播放链路。
+     * [NvaCastController] 全部投递到主线程回调，这里无需加锁；
+     * pause/resume 与暂停按钮同款行为（弹幕渲染同步暂停/恢复）。
+     */
+    private val castBridge = object : NvaPlayerBridge {
+        override fun pause() {
+            player?.pause()
+            if (::playerView.isInitialized) playerView.pauseDanmaku()
+        }
+
+        override fun resume() {
+            player?.play()
+            if (::playerView.isInitialized) playerView.resumeDanmaku()
+        }
+
+        override fun stopAndExit() {
+            player?.stop()
+            finish()
+        }
+
+        override fun seekTo(positionMs: Long) {
+            player?.seekTo(positionMs.coerceAtLeast(0L))
+        }
+
+        override fun setSpeed(speed: Float) {
+            if (::playerView.isInitialized) playerView.setPlaySpeed(speed)
+        }
+
+        override fun setDanmakuEnabled(enabled: Boolean) {
+            if (::playerView.isInitialized) playerView.setDanmakuEnabled(enabled)
+        }
+
+        override fun selectQuality(qn: Int) {
+            if (qn <= 0) return
+            val qualities = viewModel.qualities.value
+            // 档位由 playurl 下发：优先精确匹配，其次不高于目标的最高档（手机端请求超权限
+            // 档位时收敛到本端可用档），全都不满足则忽略。
+            val target = qualities.firstOrNull { it.id == qn }
+                ?: qualities.filter { it.id <= qn }.maxByOrNull { it.id }
+                ?: return
+            val p = player ?: return
+            if (::playerView.isInitialized) {
+                playerView.showQualitySwitchingHint(target.displayName(this@PlayerActivity))
+            }
+            viewModel.selectVideoQuality(target, p.currentPosition, p.playWhenReady)
+        }
+
+        override fun stateSnapshot(): NvaPlayerSnapshot {
+            val p = player ?: return NvaPlayerSnapshot(playState = 7)
+            return NvaPlayerSnapshot(
+                durationSec = (p.duration / 1000L).coerceAtLeast(0L),
+                positionSec = (p.currentPosition / 1000L).coerceAtLeast(0L),
+                playState = mapNvaPlayState(p.playbackState, p.isPlaying),
+                currentQn = viewModel.selectedQuality.value?.id ?: 0,
+                supportQnList = viewModel.qualities.value
+                    .sortedByDescending { it.id }
+                    .map { q ->
+                        NvaQnOption(
+                            quality = q.id,
+                            displayDesc = q.resolution.ifBlank { q.name },
+                            description = q.name,
+                            // B 站档位规则：1080P 起需登录，1080P+/4K 等高码率档需大会员
+                            needVip = q.id >= 112,
+                            needLogin = q.id >= 80,
+                        )
+                    },
+            )
+        }
+    }
+
+    /** Media3 播放状态 → NVA 约定：3 加载中 / 4 播放中 / 5 暂停 / 6 结束 / 7 停止。 */
+    private fun mapNvaPlayState(playbackState: Int, isPlaying: Boolean): Int =
+        when (playbackState) {
+            Player.STATE_BUFFERING -> 3
+            Player.STATE_READY -> if (isPlaying) 4 else 5
+            Player.STATE_ENDED -> 6
+            else -> 7
+        }
+
     // coordinator 状态（面板开关、chrome 超时等）变化后即时重算字幕让位高度
     private val coordinatorStateListener = object : PlaybackUiCoordinator.OnStateChangedListener {
         override fun onStateChanged(coordinator: PlaybackUiCoordinator) {
@@ -342,6 +434,9 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
 
     /** 青少年模式-公益广告锁死模式：屏蔽所有操作，播完自动退出。仅通过 EXTRA_PSAS_LOCKED 进入。 */
     private var psasLocked: Boolean = false
+
+    /** 本次播放由手机投屏下发：tag 内容过滤对投屏视频不生效（用户手机端主动选择的内容）。 */
+    private var castPlayback: Boolean = false
 
     // 抖音模式（编排逻辑已迁出至 DouyinPlaybackCoordinator）
     private lateinit var douyinCoordinator: DouyinPlaybackCoordinator
@@ -482,6 +577,16 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
             )
         }
 
+        override fun onVideoInputFormatChanged(
+            eventTime: AnalyticsListener.EventTime,
+            format: androidx.media3.common.Format,
+            decoderReuseEvaluation: androidx.media3.exoplayer.DecoderReuseEvaluation?
+        ) {
+            // 无缝切档时状态恒为 READY 不触发状态回调，视频格式变化即切换真实生效，
+            // 以此作为「画质切换中」提示的撤除信号（起播首次回调时无提示，hide 幂等无害）。
+            if (::playerView.isInitialized) playerView.hideQualitySwitchingHint()
+        }
+
         override fun onAudioUnderrun(
             eventTime: AnalyticsListener.EventTime,
             bufferSize: Int,
@@ -542,6 +647,8 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
                     playerView.pauseDanmaku()
                 }
                 Player.STATE_READY -> {
+                    // 非无缝切换重建完成后回到 READY，撤掉「画质切换中」提示
+                    if (::playerView.isInitialized) playerView.hideQualitySwitchingHint()
                     startupTrace
                         ?.takeIf { !it.readyLogged }
                         ?.also {
@@ -590,7 +697,8 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
             startupTrace = null
             viewModel.setLoading(false)
             viewModel.handlePlaybackError(error, player?.currentPosition ?: 0L)
-            AppLog.e(TAG, "player error: ${error.message}", error)
+            AppLog.e(TAG, "player error: ${error.message} code=${error.errorCode}", error)
+            if (::playerView.isInitialized) playerView.cancelQualitySwitchingHint()
             playerView.pauseDanmaku()
             syncPlaybackEnvironment()
         }
@@ -635,6 +743,7 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
 
     private fun handleIntent(intent: Intent) {
         psasLocked = intent.getBooleanExtra(EXTRA_PSAS_LOCKED, false)
+        castPlayback = intent.getBooleanExtra(EXTRA_FROM_CAST, false)
         val aid = intent.getLongExtra(EXTRA_AID, 0L)
         val bvid = intent.getStringExtra(EXTRA_BVID).orEmpty()
         val cid = intent.getLongExtra(EXTRA_CID, 0L)
@@ -657,6 +766,7 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
 
         val seekPositionMs = intent.getLongExtra(EXTRA_SEEK_MS, 0L)
         val startEpisodeIndex = intent.getIntExtra(EXTRA_START_EPISODE, -1)
+        val desiredQn = intent.getIntExtra(EXTRA_DESIRED_QN, 0)
         val shouldStartLoadBeforeUiInit = !initialized
         if (shouldStartLoadBeforeUiInit) {
             tagCheckDoneForCurrentVideo = false
@@ -671,7 +781,8 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
                 seekPositionMs = seekPositionMs,
                 startEpisodeIndex = startEpisodeIndex,
                 startupTraceId = startupTraceId,
-                startupTraceStartElapsedMs = startupTraceStartMs
+                startupTraceStartElapsedMs = startupTraceStartMs,
+                desiredQn = desiredQn
             )
         }
 
@@ -707,7 +818,8 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
                 seekPositionMs = seekPositionMs,
                 startEpisodeIndex = startEpisodeIndex,
                 startupTraceId = startupTraceId,
-                startupTraceStartElapsedMs = startupTraceStartMs
+                startupTraceStartElapsedMs = startupTraceStartMs,
+                desiredQn = desiredQn
             )
         }
     }
@@ -722,7 +834,8 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
         seekPositionMs: Long,
         startEpisodeIndex: Int,
         startupTraceId: String,
-        startupTraceStartElapsedMs: Long
+        startupTraceStartElapsedMs: Long,
+        desiredQn: Int = 0
     ) {
         preparePlaybackUiForNewRequest()
         sessionCoordinator.replacePlayQueue(playQueue)
@@ -736,7 +849,8 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
             seekPositionMs = seekPositionMs,
             startEpisodeIndex = startEpisodeIndex,
             startupTraceId = startupTraceId,
-            startupTraceStartElapsedMs = startupTraceStartElapsedMs
+            startupTraceStartElapsedMs = startupTraceStartElapsedMs,
+            desiredQn = desiredQn
         )
     }
 
@@ -758,7 +872,8 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
         seekPositionMs: Long,
         startEpisodeIndex: Int,
         startupTraceId: String,
-        startupTraceStartElapsedMs: Long
+        startupTraceStartElapsedMs: Long,
+        desiredQn: Int = 0
     ) {
         viewModel.loadVideoInfo(
             aid = aid,
@@ -770,7 +885,8 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
             startEpisodeIndex = startEpisodeIndex,
             startupTraceId = startupTraceId,
             startupTraceStartElapsedMs = startupTraceStartElapsedMs,
-            isSteinsGate = playQueue.firstOrNull()?.isSteinsGate == true
+            isSteinsGate = playQueue.firstOrNull()?.isSteinsGate == true,
+            preferredQualityId = desiredQn
         )
     }
 
@@ -1100,6 +1216,7 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
         syncPlaybackEnvironment()
         playerView.setOnPlayerSettingChange(object : OnPlayerSettingChange {
             override fun onVideoQualityChange(quality: VideoQuality) {
+                playerView.showQualitySwitchingHint(quality.displayName(this@PlayerActivity))
                 val snapshot = capturePlaybackSnapshot()
                 viewModel.selectVideoQuality(quality = quality, currentPositionMs = snapshot.first, playWhenReady = snapshot.second)
                 playerView.showHideSettingView(false)
@@ -1169,6 +1286,8 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
             viewModel.sponsorUserSeek(positionMs)
         }
         playerView.onChapterPanelRequestListener = { showChapterDialog() }
+        // UP 直达选集/合集面板来自控制栏隐藏态：不弹控制栏，面板关闭后保持隐藏
+        playerView.onEpisodePanelRequestListener = { showChooseEpisodeDialog(fromHiddenDpad = true) }
         renderControllerChrome(View.GONE)
     }
 
@@ -1195,13 +1314,15 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
                         "setting=${playerView.isSettingViewShowing()} " +
                         "panel=${uiCoordinator.hasVisiblePanel()} " +
                         "controller=${playerView.isControllerFullyVisible()} " +
+                        "controllerPartial=${playerView.isControllerPartiallyVisible()} " +
                         "ended=${player?.playbackState == Player.STATE_ENDED}"
                 )
                 uiCoordinator.handleBackPress(
                     isSettingShowing = playerView.isSettingViewShowing(),
                     hideSetting = { playerView.showHideSettingView(false) },
                     isEndPanelShowing = playbackEndPanelController.isShowing(),
-                    hideEndPanel = { playbackEndPanelController.hide() },
+                    // 播完推荐页按返回直接退出：视频已结束，不再先关面板、也不走「再按一次退出」确认
+                    exitPlayerFromEndPanel = { finish() },
                     isAutoPlayPending = autoPlayController.hasPendingAction,
                     cancelAutoPlayAndShowEndPanel = {
                         // 隐藏右下角倒计时卡=取消连播（触发 clearPendingContinuation），并展示推荐页
@@ -1209,7 +1330,10 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
                         hideNextPreview()
                         playbackEndPanelController.show()
                     },
-                    isControllerFullyVisible = playerView.isControllerFullyVisible(),
+                    // 部分可见（仅进度条/淡出动画中）时 BACK 也要先收控制层：
+                    // 否则一旦进度条卡在部分可见态，BACK 会穿透成退出播放器
+                    isControllerFullyVisible = playerView.isControllerFullyVisible() ||
+                        playerView.isControllerPartiallyVisible(),
                     hideController = { playerView.hideController() },
                     hidePanel = { hideContentPanel() },
                     exitPlayer = {
@@ -1657,6 +1781,8 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
         }
         playerView.removeCallbacks(resumePlaybackRunnable)
         playerView.postDelayed(resumePlaybackRunnable, 250L)
+        // 投屏桥接在播放页可见时注册，手机端由此恢复控制条状态
+        NvaCastController.get()?.attachBridge(castBridge)
     }
 
     override fun onResume() {
@@ -1711,6 +1837,7 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
     }
 
     override fun onDestroy() {
+        NvaCastController.get()?.detachBridge(castBridge)
         uninstallMainThreadJankMonitor()
         uiCoordinator.removeListener(coordinatorStateListener)
         playerView.removeCallbacks(resumePlaybackRunnable)
@@ -1736,12 +1863,18 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
     /**
      * 主线程慢消息诊断（AppLog 开启时安装）：单条消息 dispatch 超过 10ms 即打点，
      * 用于把 UI 掉帧归因到具体消息（Choreographer doFrame / 进度刷新 / 其他回调）。
-     * Printer 每条消息由框架拼一次字符串，仅在诊断期安装，onDestroy 卸载。
+     * 每条附带 heap=used/totalMB 与 gc!Δused（used 骤降标记），用于把 doFrame 超时
+     * 与 GC 事件对齐。Printer 每条消息由框架拼一次字符串，仅在诊断期安装，onDestroy 卸载。
      */
     private var mainThreadJankPrinter: Printer? = null
     private var jankMsgStartNs = 0L
     private var jankMsgText: String = ""
     private var lastJankLogAtMs = 0L
+
+    // GC 归因探针：记录上一条 jank 采样时的堆 used，骤降 ≥4MB 即两次采样之间
+    // 发生过 GC（消息内分配触发时暂停直接计入 cost）。doFrame 超时但弹幕绘制
+    // 本身 <1ms 的场景（堆顶满锯齿），靠它与 GC 事件毫秒级对齐归因。
+    private var jankLastUsedBytes = 0L
 
     private fun installMainThreadJankMonitor() {
         if (!AppLog.isEnabled) return
@@ -1757,7 +1890,19 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
                     val now = SystemClock.uptimeMillis()
                     if (now - lastJankLogAtMs >= 200L) {
                         lastJankLogAtMs = now
-                        AppLog.w("MainThreadJank", "main msg cost=${costMs}ms ${jankMsgText.take(140)}")
+                        val rt = Runtime.getRuntime()
+                        val usedBytes = rt.totalMemory() - rt.freeMemory()
+                        val gcLabel =
+                            if (jankLastUsedBytes > 0L && usedBytes < jankLastUsedBytes - 4L * 1024L * 1024L) {
+                                " gc!Δused=-${(jankLastUsedBytes - usedBytes) / (1024L * 1024L)}MB"
+                            } else {
+                                ""
+                            }
+                        jankLastUsedBytes = usedBytes
+                        AppLog.w(
+                            "MainThreadJank",
+                            "main msg cost=${costMs}ms heap=${usedBytes / (1024L * 1024L)}/${rt.totalMemory() / (1024L * 1024L)}MB$gcLabel ${jankMsgText.take(140)}",
+                        )
                     }
                 }
             }
@@ -1814,10 +1959,14 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
     }
 
     private fun isVideoBlockedByMinorProtection(video: VideoModel): Boolean {
+        // 投屏会话不做青少年保护拦截（含 tag 分支与综合判定分支）：内容是用户手机端
+        // 主动选的；开关开着时投来命中词表的视频会被"拉黑+点踩+退出播放页"。
+        if (castPlayback) return false
         return PlayerContentGuards.isVideoBlocked(this, video)
     }
 
     private fun isEpisodeBlockedByMinorProtection(episode: VideoPlayerViewModel.PlayableEpisode): Boolean {
+        if (castPlayback) return false
         return PlayerContentGuards.isEpisodeBlocked(this, episode)
     }
 
@@ -1827,6 +1976,9 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
         if (view.aid <= 0L && view.bvid.isBlank()) return
         tagCheckDoneForCurrentVideo = true
 
+        // 投屏来源跳过：tag 过滤用于净化本地推荐/搜索流，投屏是用户手机端主动选的视频，
+        // 拦截会造成"点击投屏直接退出播放页"（还会顺带触发拉黑+点踩的副作用请求）。
+        if (castPlayback) return
         if (!ContentFilter.isBlockedByTags(this, info.tags)) return
 
         AppLog.i(TAG, "Video blocked by tags: aid=${view.aid}, bvid=${view.bvid}, tags=${info.tags?.map { it.tagName }}")
@@ -2115,7 +2267,9 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
         overlayUiController.hideContentPanel()
     }
 
-    private fun showChooseEpisodeDialog() { overlayUiController.showChooseEpisodeDialog() }
+    private fun showChooseEpisodeDialog(fromHiddenDpad: Boolean = false) {
+        overlayUiController.showChooseEpisodeDialog(fromHiddenDpad)
+    }
     private fun showChapterDialog() {
         val points = viewModel.viewPoints.value
         if (points.isEmpty()) return
@@ -2162,6 +2316,7 @@ class PlayerActivity : BaseActivity<FragmentVideoPlayerBinding>() {
             PlayerScreenLogic.isMusicZone(latestVideoInfo?.view)
         playerView.setPlaySpeed(if (musicZoneNormalSpeed) 1f else settings.defaultPlaybackSpeed)
         playerView.showPlaybackRateIndicator(settings.showPlaybackRate)
+        playerView.showAlwaysOnClock(settings.showAlwaysOnClock)
         playerView.setSeekSecond(settings.fastSeekSeconds)
         playerView.setSimpleKeyPressEnabled(settings.simpleKeyPress)
         playerView.setPersistentBottomProgressEnabled(settings.showBottomProgressBar)

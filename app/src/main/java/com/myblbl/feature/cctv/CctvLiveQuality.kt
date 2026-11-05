@@ -9,8 +9,11 @@ package com.myblbl.feature.cctv
  * （BANDWIDTH 落窗才保留；窗口为空时顶格返回最高档，不会失败）。因此切画质 = 改写 master
  * 请求的 `b=` 窗口，让清单只含目标档变体，MSE 播放器自然锁档。
  *
- * 各档窗口经 cctv1/cctv13 实测标定（CDN 变体固定为 1800k/1350k/900k/600k 四档，
- * 对应 720/576/480/360；当前 CCTV 直播最高 720p，无 1080 变体的频道选 1080 会顶格拿 720）。
+ * 各档窗口经 cctv1/cctv13 实测标定（CDN 变体为 1800k(720p)/1350k(576p)/900k(480p)/600k(360p)；
+ * master 里另有声明 1920x1080/3200k 的 `_pd` 变体，但 ffmpeg 实测三分片（cctv1×2 时刻、
+ * cctvchild）全部 640x360——**假 1080P 占位轨**，1080P 档窗口不得命中它，须顶格锁 1800k=720p，
+ * 这也是当前 vdn 源可得的最高真实画质）。
+ * 全部变体均为 H.264（分片 SPS type7 实测）——vdn 源无 HEVC/AV1 可选。
  */
 enum class CctvLiveQuality(
     val label: String,

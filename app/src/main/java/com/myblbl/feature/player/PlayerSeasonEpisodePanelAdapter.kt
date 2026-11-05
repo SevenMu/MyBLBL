@@ -9,6 +9,7 @@ import android.graphics.Outline
 import androidx.recyclerview.widget.RecyclerView
 import androidx.media3.common.util.UnstableApi
 import com.myblbl.core.ui.image.ImageLoader
+import com.myblbl.core.common.log.AppLog
 import com.myblbl.R
 import com.myblbl.core.common.time.TimeUtils
 import com.myblbl.core.common.format.NumberUtils
@@ -80,41 +81,59 @@ class PlayerSeasonEpisodePanelAdapter(
     ) : RecyclerView.ViewHolder(binding.root) {
 
         init {
-            // 封面圆角与首页卡片一致（px15）
-            binding.imageCover.clipToOutline = true
-            binding.imageCover.outlineProvider = object : ViewOutlineProvider() {
-                override fun getOutline(view: View, outline: Outline) {
-                    outline.setRoundRect(
-                        0,
-                        0,
-                        view.width,
-                        view.height,
-                        view.resources.getDimension(R.dimen.px15)
-                    )
+            // 封面圆角与首页卡片一致（px15）。圆角裁剪必须挂在外层封面容器
+            // （imageCover.parent，无 id 的 FrameLayout）而非 imageCover：底部
+            // 信息条是 imageCover 的兄弟 View，其渐变背景为直角且贴底铺满，
+            // 只裁 imageCover 时封面下缘的两个圆角会被它盖成直角。
+            (binding.imageCover.parent as? ViewGroup)?.let { coverBox ->
+                coverBox.clipToOutline = true
+                coverBox.outlineProvider = object : ViewOutlineProvider() {
+                    override fun getOutline(view: View, outline: Outline) {
+                        outline.setRoundRect(
+                            0,
+                            0,
+                            view.width,
+                            view.height,
+                            view.resources.getDimension(R.dimen.px15)
+                        )
+                    }
                 }
             }
             // 列表内按返回键回到分组 tab（不关闭弹窗）；DOWN/UP 都消费，
             // 防止 DOWN 穿透后 Dialog 层开始 tracking、UP 时关闭弹窗。
             // 第一项按“上”同理回 tab。
             binding.clickView.setOnKeyListener { _, keyCode, event ->
+                if (keyCode == KeyEvent.KEYCODE_BACK) {
+                    AppLog.i(
+                        "SeasonPanel",
+                        "item BACK action=${event.action} repeat=${event.repeatCount} " +
+                            "pos=$bindingAdapterPosition focused=${binding.clickView.hasFocus()}"
+                    )
+                }
                 when (keyCode) {
-                    KeyEvent.KEYCODE_BACK -> {
-                        if (event.action == KeyEvent.ACTION_DOWN ||
-                            event.action == KeyEvent.ACTION_UP
-                        ) {
-                            onBackToTab()
-                            return@setOnKeyListener true
-                        }
-                        false
-                    }
+                    // BACK 不在 view 层拦截（MuMu Android 15 实测）：BACK 的
+                    // DOWN 会到达 item listener，且同一按键内 dispatcher 的
+                    // handleOnBackPressed 仍触发（view 层消费与否不影响）——
+                    // 若在此消费并把焦点移到 tab，dispatcher 判定时焦点已不在
+                    // 列表 → 一次按键直接关弹窗。全权交 backPressedDispatcher
+                    // 的 handler 判定（其时焦点仍在列表项上未被移动）：列表内
+                    // 回 tab、tab 上关闭。
                     KeyEvent.KEYCODE_DPAD_UP -> {
-                        if (event.action == KeyEvent.ACTION_UP &&
-                            bindingAdapterPosition == 0
-                        ) {
-                            onBackToTab()
-                            return@setOnKeyListener true
+                        // 仅首项响应：DOWN 即回 tab（DOWN 消费本身也阻止默认
+                        // 焦点查找把焦点飞到列表外）。UP 只消费不触发——从
+                        // 第 2 项按“上”时焦点移动发生在 DOWN，随后的 UP 已落在
+                        // 首项 listener 上，若 UP 也触发会表现为“焦点刚移到
+                        // 首项就自动跳回 tab”。
+                        if (bindingAdapterPosition == 0) {
+                            if (event.action == KeyEvent.ACTION_DOWN &&
+                                event.repeatCount == 0
+                            ) {
+                                onBackToTab()
+                            }
+                            true
+                        } else {
+                            false
                         }
-                        false
                     }
                     KeyEvent.KEYCODE_DPAD_DOWN -> {
                         // 最后一项按“下”留在原地，避免焦点飞出列表
@@ -149,12 +168,9 @@ class PlayerSeasonEpisodePanelAdapter(
             binding.textPubDate.text = TimeUtils.formatPubDate(item.pubDate)
             binding.textPubDate.visibility =
                 if (item.pubDate > 0L) View.VISIBLE else View.INVISIBLE
-            ImageLoader.load(
-                binding.imageCover,
-                item.cover,
-                R.drawable.default_video,
-                R.drawable.default_video
-            )
+            // 必须走 loadVideoCover（16:9 规格）：普通 load 拼方图规格 @480w_480h_1c，
+            // 16:9 封面先被 CDN 居中裁成 1:1、再被 5:3 框 centerCrop 二次裁切，构图严重损失
+            ImageLoader.loadVideoCover(binding.imageCover, item.cover)
             // 封面底部信息条：样式与首页推荐卡片一致（播放量/弹幕/时长）
             if (item.playCount > 0L) {
                 binding.groupPlay.visibility = View.VISIBLE
@@ -168,7 +184,13 @@ class PlayerSeasonEpisodePanelAdapter(
             } else {
                 binding.groupDanmaku.visibility = View.GONE
             }
-            binding.textDuration.text = NumberUtils.formatDuration(item.duration)
+            // 时长缺数据（如 PGC 剧集分集）时整块隐藏，不显示假的 00:00
+            if (item.duration > 0L) {
+                binding.textDuration.visibility = View.VISIBLE
+                binding.textDuration.text = NumberUtils.formatDuration(item.duration)
+            } else {
+                binding.textDuration.visibility = View.GONE
+            }
             if (isSelected) {
                 binding.iconPlaying.visibility = View.VISIBLE
                 ImageLoader.loadDrawableRes(binding.iconPlaying, R.drawable.playing)

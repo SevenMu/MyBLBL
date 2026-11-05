@@ -16,11 +16,13 @@ import com.myblbl.core.common.update.ApkUpdater
 import com.myblbl.core.ui.base.AppToast
 import com.myblbl.core.ui.base.DialogWindowFit
 import com.myblbl.core.ui.base.ScaledTextView
+import com.myblbl.core.ui.base.UiScale
 import com.myblbl.ui.widget.NonFocusableScrollView
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -28,8 +30,9 @@ import kotlinx.coroutines.withContext
  * 更新流程弹窗：发现新版本确认弹窗 + 下载进度弹窗。
  *
  * 从 SettingsFragment 提取的共享组件，设置页手动检查与启动后自动检查两处复用。
- * 下载协程挂在宿主传入的 [CoroutineScope] 上（Fragment 传其 updateScope、
- * Activity 传 lifecycleScope），宿主销毁即取消下载，与提取前行为一致。
+ * 下载协程挂在 [downloadScope]（object 级、随进程存活）上：进度弹窗可「转后台」
+ * 关闭后继续下载，宿主页面销毁也不中断，App 进程退出才随之终止；下载完成
+ * 自动拉起系统安装界面。
  */
 object UpdateFlowDialog {
 
@@ -50,16 +53,23 @@ object UpdateFlowDialog {
     val isBusy: Boolean
         get() = isConfirmShowing || isDownloading
 
+    /** 下载专用应用级 scope：脱离宿主页面生命周期，转后台/离开设置页都不中断下载。 */
+    private val downloadScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+
     fun showConfirmDialog(
         context: Context,
         releaseInfo: ApkUpdater.ReleaseInfo,
-        scope: CoroutineScope,
         cancelTextRes: Int = R.string.cancel,
         onDismissedWithoutDownload: (() -> Unit)? = null,
         listener: Listener? = null,
     ) {
         if (isBusy) return
         isConfirmShowing = true
+
+        // 弹窗密度守卫：上个弹窗（如确认弹窗→下载弹窗连续流程）引发的系统栏显隐
+        // 会在 Activity 失焦窗口内重置 DisplayMetrics，onWindowFocusChanged 补钉
+        // 不跑；此处必须在取 px 值之前补回，否则字号/间距按系统原始 density 放大
+        UiScale.ensureApplied(context.resources)
 
         val resources = context.resources
         val px40 = resources.getDimensionPixelSize(R.dimen.px40)
@@ -118,9 +128,11 @@ object UpdateFlowDialog {
             lp.weight = 1f
             layoutParams = lp
         }
+        // 滚动条位置诊断：滚动过程记录 thumb 几何（ScrollBarDebug）
+        notesScroll.scrollDebugTag = "otaNotes"
         notesScroll.addView(ScaledTextView(context).apply {
             val notes = if (releaseInfo.releaseNotes.isNotBlank()) {
-                context.getString(R.string.update_release_notes_format, releaseInfo.releaseNotes)
+                context.getString(R.string.update_release_notes_format, formatReleaseNotes(releaseInfo.releaseNotes))
             } else ""
             text = context.getString(
                 R.string.update_confirm_message_format,
@@ -153,7 +165,7 @@ object UpdateFlowDialog {
         listOf(context.getString(cancelTextRes) to { dialog.dismiss() }, context.getString(R.string.update_download_action) to {
             launchDownload = true
             dialog.dismiss()
-            startDownloadApk(context, scope, releaseInfo.apkUrl, listener)
+            startDownloadApk(context, releaseInfo, listener)
         }).forEach { (text, action) ->
             val button = ScaledTextView(context).apply {
                 this.text = text
@@ -175,7 +187,9 @@ object UpdateFlowDialog {
         DialogWindowFit.overlay(
             dialog,
             DialogWindowFit.wrapContentInScroll(context, root),
-            resources.getDimensionPixelSize(R.dimen.px800),
+            // 更新日志单行动辄 20+ 字，px800 档正文区仅约 24 字宽必然折行破碎，
+            // 用使用技巧弹窗同款 px1100
+            resources.getDimensionPixelSize(R.dimen.px1100),
             cancelOnOutside = false,
             tag = "riskControl"
         )
@@ -206,7 +220,39 @@ object UpdateFlowDialog {
         // 初始焦点分配覆盖，必须等首次布局完成
         root.post {
             cancelButton?.requestFocus()
+            // 布局稳定后的滚动区几何快照：内层正文区 + 外层 wrap 滚动容器是否可滚
+            val notesChild = notesScroll.getChildAt(0)
+            val outerScroll = root.parent as? com.myblbl.ui.widget.NonFocusableScrollView
+            outerScroll?.scrollDebugTag = "otaOuter"
+            com.myblbl.core.common.log.AppLog.i(
+                "ScrollBarDebug",
+                "[otaNotes] settled notesH=${notesScroll.height} childH=${notesChild?.height} " +
+                    "maxHeight=${notesScroll.maxHeight} scrollable=${notesScroll.height < (notesChild?.height ?: 0)} | " +
+                    "outerH=${outerScroll?.height} outerChildH=${root.height} outerScrollable=${((outerScroll?.height ?: 0) < root.height)}"
+            )
         }
+    }
+
+    /**
+     * 把更新日志格式化为「1. xxx。」带编号、带句号的展示形态。
+     *
+     * 数据源两种形态都可能出现：version.json 的裸文本行（\n 分隔）与
+     * GitHub Release 正文的 "- " markdown 行（api.github.com 兜底链路），
+     * 均无编号无句号；此处剥掉行首已有的列表符/编号统一重新编号，结尾
+     * 无终止标点的补句号。编号后必须跟空格才视为编号（避免误剥
+     * 「1.5倍速」这类数字开头正文）。
+     */
+    private fun formatReleaseNotes(raw: String): String {
+        return raw.lines()
+            .map { line ->
+                line.trim().replace(Regex("^(?:[-*•]\\s+|\\d{1,2}[.、)]\\s+)"), "")
+            }
+            .filter { it.isNotBlank() }
+            .mapIndexed { index, body ->
+                val punctuated = if (body.last() in "。！？.!?") body else "$body。"
+                "${index + 1}. $punctuated"
+            }
+            .joinToString("\n")
     }
 
     /** 宿主 Activity 已销毁等极端场景 show 抛 BadToken，吞掉并返回 false 由调用方复位守卫 */
@@ -222,25 +268,44 @@ object UpdateFlowDialog {
 
     fun startDownloadApk(
         context: Context,
-        scope: CoroutineScope,
-        apkUrl: String,
+        releaseInfo: ApkUpdater.ReleaseInfo,
         listener: Listener? = null,
     ) {
-        if (isDownloading) return
+        if (isDownloading) {
+            AppToast.show(context, context.getString(R.string.update_in_progress_toast), Toast.LENGTH_SHORT)
+            return
+        }
+
+        // 下载可能转后台跨页面存活：网络/安装/Toast 一律走 applicationContext，
+        // 避免持有已销毁的宿主 Activity
+        val appContext = context.applicationContext
+
+        // 同一会话内已有同版本完整包（如下载完但安装界面被关掉没装）：
+        // 直接复用弹安装界面，不重新下载。放在 isDownloading 守卫之后，
+        // 下载进行中先挡重复入口，不会与后台 job 完成时的安装重叠
+        ApkUpdater.findDownloadedApk(appContext, releaseInfo.versionName)?.let {
+            ApkUpdater.installApk(appContext, it)
+            return
+        }
         isDownloading = true
+
+        // 密度守卫须在取 px 值之前：确认弹窗 dismiss 后 Activity 尚未重获焦点，
+        // 期间系统重置的 DisplayMetrics 无人补钉，取值会按原始 density 放大数倍
+        UiScale.ensureApplied(context.resources)
 
         val resources = context.resources
         val px40 = resources.getDimensionPixelSize(R.dimen.px40)
         val px35 = resources.getDimensionPixelSize(R.dimen.px35)
         val px20 = resources.getDimensionPixelSize(R.dimen.px20)
         val px18 = resources.getDimensionPixelSize(R.dimen.px18)
+        val px16 = resources.getDimensionPixelSize(R.dimen.px16)
         val px14 = resources.getDimensionPixelSize(R.dimen.px14)
+        val px10 = resources.getDimensionPixelSize(R.dimen.px10)
         val textColor = resources.getColor(R.color.textColor, null)
 
         val dialog = AppCompatDialog(context, R.style.DialogTheme)
         dialog.setCancelable(false)
         dialog.setCanceledOnTouchOutside(false)
-        dialog.setOnDismissListener { isDownloading = false }
 
         val root = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -285,11 +350,35 @@ object UpdateFlowDialog {
         root.addView(progressText)
 
         var downloadJob: Job? = null
+        val actionContainer = LinearLayout(context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.END
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            lp.setMargins(px18, px20, px18, px18)
+            layoutParams = lp
+        }
+
+        // 转后台：只关进度弹窗，不动下载 job、不复位 isDownloading（继续避让
+        // 自动检查/重复下载）；完成/失败/取消由下载 job 收尾统一复位
+        val backgroundButton = ScaledTextView(context).apply {
+            text = context.getString(R.string.update_download_background)
+            setTextColor(textColor)
+            setTextSize(TypedValue.COMPLEX_UNIT_PX, resources.getDimension(R.dimen.px32))
+            setPadding(px16, px14, px16, px14)
+            isClickable = true
+            isFocusable = true
+            setBackgroundResource(R.drawable.bg_dialog_button)
+            setOnClickListener {
+                dialog.dismiss()
+                AppToast.show(appContext, appContext.getString(R.string.update_background_toast), Toast.LENGTH_LONG)
+            }
+        }
+
         val cancelButton = ScaledTextView(context).apply {
             text = context.getString(R.string.cancel)
             setTextColor(textColor)
             setTextSize(TypedValue.COMPLEX_UNIT_PX, resources.getDimension(R.dimen.px32))
-            setPadding(resources.getDimensionPixelSize(R.dimen.px16), px14, resources.getDimensionPixelSize(R.dimen.px16), px14)
+            setPadding(px16, px14, px16, px14)
             isClickable = true
             isFocusable = true
             setBackgroundResource(R.drawable.bg_dialog_button)
@@ -298,12 +387,14 @@ object UpdateFlowDialog {
                 dialog.dismiss()
                 listener?.onResetCheckState()
             }
-            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT)
-            lp.setMargins(px18, px20, px18, px18)
-            lp.gravity = Gravity.END
-            layoutParams = lp
         }
-        root.addView(cancelButton)
+
+        listOf(backgroundButton, cancelButton).forEach { button ->
+            actionContainer.addView(button, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                setMargins(px10, 0, px10, 0)
+            })
+        }
+        root.addView(actionContainer)
 
         DialogWindowFit.overlay(
             dialog,
@@ -315,16 +406,20 @@ object UpdateFlowDialog {
             isDownloading = false
             return
         }
+        // 默认聚焦「后台下载」安全侧（非破坏性操作），与确认弹窗同款 post 等待首次布局
+        root.post { backgroundButton.requestFocus() }
 
-        downloadJob = scope.launch {
+        // isDownloading 的复位统一放 finally：进度弹窗转后台关闭后 dismiss 不再
+        // 触发任何复位，完成/失败/取消三条路径都收口到这里
+        downloadJob = downloadScope.launch {
             try {
                 val apkFile = withContext(Dispatchers.IO) {
-                    ApkUpdater.downloadApkToCache(context, apkUrl) { progress ->
+                    ApkUpdater.downloadApkToCache(appContext, releaseInfo.apkUrl) { progress ->
                         progressText.post {
                             if (!dialog.isShowing) return@post
                             when (progress) {
                                 is ApkUpdater.Progress.Connecting -> {
-                                    progressText.text = context.getString(R.string.connecting)
+                                    progressText.text = appContext.getString(R.string.connecting)
                                     progressBar.isIndeterminate = true
                                 }
                                 is ApkUpdater.Progress.Downloading -> {
@@ -334,7 +429,7 @@ object UpdateFlowDialog {
                                 }
                                 is ApkUpdater.Progress.Done -> {}
                                 is ApkUpdater.Progress.Retrying -> {
-                                    progressText.text = context.getString(R.string.retrying_format, progress.attempt, progress.maxAttempts)
+                                    progressText.text = appContext.getString(R.string.retrying_format, progress.attempt, progress.maxAttempts)
                                     progressBar.isIndeterminate = true
                                 }
                             }
@@ -342,19 +437,21 @@ object UpdateFlowDialog {
                     }
                 }
                 dialog.dismiss()
-                ApkUpdater.installApk(context, apkFile)
+                ApkUpdater.installApk(appContext, apkFile)
             } catch (e: Exception) {
                 if (e is CancellationException) return@launch
                 dialog.dismiss()
                 AppLog.e("UpdateFlowDialog", "download apk failed", e)
                 val hint = when (e) {
-                    is java.net.SocketTimeoutException -> context.getString(R.string.net_timeout_toast)
-                    is java.net.UnknownHostException -> context.getString(R.string.net_unavailable_toast)
-                    is java.io.IOException -> context.getString(R.string.net_error_toast)
-                    else -> context.getString(R.string.download_failed_toast)
+                    is java.net.SocketTimeoutException -> appContext.getString(R.string.net_timeout_toast)
+                    is java.net.UnknownHostException -> appContext.getString(R.string.net_unavailable_toast)
+                    is java.io.IOException -> appContext.getString(R.string.net_error_toast)
+                    else -> appContext.getString(R.string.download_failed_toast)
                 }
-                AppToast.show(context, hint, Toast.LENGTH_LONG)
+                AppToast.show(appContext, hint, Toast.LENGTH_LONG)
                 listener?.onResetCheckState()
+            } finally {
+                isDownloading = false
             }
         }
     }

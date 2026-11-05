@@ -35,6 +35,9 @@ class CctvVodWebViewHost(
         /** true 表示该脚本与播放无关，返回空实现让页面解析继续。 */
         fun shouldSkipScript(url: String): Boolean
 
+        /** true 表示该请求与播放无关（如第三方广告投放），返回空响应不让它出网。 */
+        fun shouldBlockRequest(url: String): Boolean
+
         /** 老内核兜底：返回注入补丁后的主文档 HTML；null 表示不接管。 */
         fun mainDocumentHtml(url: String, cookie: String?): ByteArray?
     }
@@ -48,6 +51,8 @@ class CctvVodWebViewHost(
     private var customViewCallback: Any? = null
 
     init {
+        // canLoadX5 已被 X5 SDK 标弃用但无等价替代 API，维持原判定
+        @Suppress("DEPRECATION")
         val canLoadX5 = runCatching { QbSdk.canLoadX5(context) }.getOrDefault(false)
         val x5 = if (canLoadX5) {
             runCatching { createX5WebView() }
@@ -210,6 +215,11 @@ class CctvVodWebViewHost(
                         "application/javascript", "utf-8", ByteArrayInputStream(ByteArray(0))
                     )
                 }
+                if (listener.shouldBlockRequest(url)) {
+                    return android.webkit.WebResourceResponse(
+                        "text/plain", "utf-8", ByteArrayInputStream(ByteArray(0))
+                    )
+                }
                 return super.shouldInterceptRequest(view, request)
             }
 
@@ -258,6 +268,8 @@ class CctvVodWebViewHost(
         // 主动 requestFocus 把焦点抢回网页层；不阻断的话控制条按钮永远拿不到焦点。
         wv.descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
         wv.settings.apply {
+            // X5 WebSettings 弃用了该 setter 但未提供等价替代 API，维持原开关
+            @Suppress("DEPRECATION")
             javaScriptEnabled = true
             domStorageEnabled = true
             mediaPlaybackRequiresUserGesture = false
@@ -304,6 +316,11 @@ class CctvVodWebViewHost(
                 if (listener.shouldSkipScript(url)) {
                     return com.tencent.smtt.export.external.interfaces.WebResourceResponse(
                         "application/javascript", "utf-8", ByteArrayInputStream(ByteArray(0))
+                    )
+                }
+                if (listener.shouldBlockRequest(url)) {
+                    return com.tencent.smtt.export.external.interfaces.WebResourceResponse(
+                        "text/plain", "utf-8", ByteArrayInputStream(ByteArray(0))
                     )
                 }
                 return super.shouldInterceptRequest(view, request)

@@ -820,7 +820,7 @@ class CctvPlayerActivity : BaseActivity<ActivityCctvPlayerBinding>() {
             <head>
               <meta charset="utf-8">
               <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-              <title>MyTVB $safeId</title>
+              <title>MyBLBL $safeId</title>
               <style>
                 html,body,#player{width:100%;height:100%;margin:0;padding:0;background:#000;overflow:hidden;}
                 #player{position:fixed;left:0;top:0;z-index:1;}
@@ -947,7 +947,7 @@ $scriptTags
         private const val EXIT_INTERVAL_MS = 2_000L
         private const val SWIPE_DISTANCE = 90
         private const val USER_AGENT =
-            "Mozilla/5.0 (Linux; Android 10; TV; MyTVB) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Mobile Safari/537.36"
+            "Mozilla/5.0 (Linux; Android 10; TV; MyBLBL) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Mobile Safari/537.36"
         private val CCTV_HOSTS = setOf(
             "cctv.com",
             "cntv.cn",

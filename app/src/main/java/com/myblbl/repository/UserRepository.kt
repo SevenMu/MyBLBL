@@ -1,5 +1,7 @@
 package com.myblbl.repository
 
+import com.google.gson.reflect.TypeToken
+import com.myblbl.core.common.json.GsonHolder
 import com.myblbl.model.BaseResponse
 import com.myblbl.model.user.UserStatModel
 import com.myblbl.model.user.UserSpaceInfo
@@ -7,6 +9,7 @@ import com.myblbl.model.user.UserDetailInfoModel
 import com.myblbl.model.user.CheckRelationModel
 import com.myblbl.model.user.GetFollowUserWrapper
 import com.myblbl.model.video.HistoryListResponse
+import com.myblbl.model.video.HistoryVideoModel
 import com.myblbl.model.video.LaterWatchWrapper
 import com.myblbl.model.video.UserDynamicResponse
 import com.myblbl.model.video.AllDynamicResponse
@@ -108,18 +111,53 @@ class UserRepository(
         return sessionGateway.isLoggedIn()
     }
     
-    suspend fun getHistory(viewAt: Long, pageSize: Int): Result<BaseResponse<HistoryListResponse>> =
+    suspend fun getHistory(
+        viewAt: Long,
+        pageSize: Int,
+        max: Long = 0,
+        business: String = ""
+    ): Result<BaseResponse<HistoryListResponse>> =
         runCatching {
             sessionGateway.executeWithRiskControlRetry(
                 key = "history",
                 source = "getHistory"
             ) {
                 sessionGateway.syncAuthState(
-                    apiService.getHistory(viewAt, pageSize),
+                    // 游标是 max+business+view_at 三元组（官方文档"类似链表 next 指针"）：
+                    // 只传 view_at 时同一秒的相邻条目无法定位边界，跨页会丢/重条目。
+                    apiService.getHistory(viewAt, max, business, pageSize),
                     source = "getHistory"
                 )
             }
         }
+
+    /**
+     * 历史页「继续观看」推荐。该接口 data 结构官方文档未收录（仅有 null 样本），
+     * 防御式解析：data 非空时取其第一个对象数组成员按历史条目模型反序列化，
+     * 只保留有 bvid 且有进度（看过一部分）的条目；解析不出则返回 null，调用方隐藏入口。
+     */
+    suspend fun getHistoryContinuation(): List<HistoryVideoModel>? =
+        runCatching {
+            val response = sessionGateway.syncAuthState(
+                apiService.getHistoryContinuation(),
+                source = "getHistoryContinuation"
+            )
+            if (!response.isSuccess) return@runCatching null
+            val data = response.data ?: return@runCatching null
+            val array = data.entrySet()
+                .asSequence()
+                .mapNotNull { it.value.asJsonArrayOrNull() }
+                .firstOrNull { it.size() > 0 }
+                ?: return@runCatching null
+            val items = GsonHolder.DEFAULT.fromJson(
+                array,
+                TypeToken.getParameterized(List::class.java, HistoryVideoModel::class.java).type
+            ) as List<HistoryVideoModel>
+            items.filter { it.bvid.isNotBlank() && it.progress > 0L }.takeIf { it.isNotEmpty() }
+        }.getOrNull()
+
+    private fun com.google.gson.JsonElement.asJsonArrayOrNull(): com.google.gson.JsonArray? =
+        if (isJsonArray) asJsonArray else null
 
     /**
      * 立刻返回稍后观看的主接口数据。番剧弹幕数补全异步进行，完成后通过

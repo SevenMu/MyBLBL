@@ -35,7 +35,9 @@ import java.util.Date
 import java.util.Locale
 import com.myblbl.core.ui.base.AppToast
 
-class VideoDetailContentAdapter(
+import com.myblbl.feature.player.comment.VideoCommentsAdapter
+
+internal class VideoDetailContentAdapter(
     private val onPlayClick: () -> Unit,
     private val onUploaderClick: () -> Unit,
     private val onLikeClick: () -> Unit,
@@ -49,7 +51,15 @@ class VideoDetailContentAdapter(
     private val onDescriptionClick: (CharSequence) -> Unit,
     private val onBackFocus: () -> Boolean,
     private val onFollowClick: () -> Unit,
-    private val onTripleAction: () -> Unit
+    private val onTripleAction: () -> Unit,
+    private val onTabSelected: (commentTab: Boolean) -> Unit = {},
+    private val onCommentSortSelected: (sortNew: Boolean) -> Unit = {},
+    private val expandedCommentRpids: MutableSet<Long> = mutableSetOf(),
+    private val onCommentToggleExpand: (rpid: Long, position: Int) -> Unit = { _, _ -> },
+    private val onCommentClick: (com.myblbl.feature.player.comment.VideoCommentItem) -> Unit = {},
+    private val onCommentLongClick: (com.myblbl.feature.player.comment.VideoCommentItem) -> Boolean = { false },
+    private val onCommentPictureClick: (com.myblbl.feature.player.comment.VideoCommentItem, Int) -> Unit = { _, _ -> },
+    private val onCommentItemFocused: () -> Unit = {}
 ) : ListAdapter<VideoDetailContentAdapter.Row, RecyclerView.ViewHolder>(RowItemCallback) {
 
     sealed interface Row {
@@ -71,6 +81,22 @@ class VideoDetailContentAdapter(
         ) : Row
 
         data class Related(val items: List<VideoModel>) : Row
+
+        /** 内容 Tab 栏：「合集·推荐/推荐」与「评论 N」切换。 */
+        data class TabBar(
+            val contentTabText: String,
+            val commentTabSelected: Boolean,
+            val commentCountText: String
+        ) : Row
+
+        /** 评论区排序行（热门/最新）。 */
+        data class CommentSort(val sortNewSelected: Boolean) : Row
+
+        /** 单条根评论（复用播放页评论面板的条目渲染）。 */
+        data class CommentEntry(val item: com.myblbl.feature.player.comment.VideoCommentItem) : Row
+
+        /** 评论区状态提示行（加载中/空/失败）。 */
+        data class CommentHint(val text: String) : Row
     }
 
     override fun getItemViewType(position: Int): Int {
@@ -79,6 +105,10 @@ class VideoDetailContentAdapter(
             is Row.Pages -> VIEW_TYPE_PAGES
             is Row.UgcSeason -> VIEW_TYPE_UGC_SEASON
             is Row.Related -> VIEW_TYPE_RELATED
+            is Row.TabBar -> VIEW_TYPE_TAB_BAR
+            is Row.CommentSort -> VIEW_TYPE_COMMENT_SORT
+            is Row.CommentEntry -> VIEW_TYPE_COMMENT_ENTRY
+            is Row.CommentHint -> VIEW_TYPE_COMMENT_HINT
         }
     }
 
@@ -111,9 +141,63 @@ class VideoDetailContentAdapter(
                 onUgcOrderToggle
             )
 
+            VIEW_TYPE_TAB_BAR -> TabBarViewHolder(
+                com.myblbl.databinding.CellVideoDetailTabBarBinding.inflate(inflater, parent, false),
+                onTabSelected,
+                nextRowIsUgcSeason = { holder ->
+                    val pos = holder.bindingAdapterPosition
+                    pos != RecyclerView.NO_POSITION &&
+                        pos + 1 < itemCount && getItem(pos + 1) is Row.UgcSeason
+                }
+            )
+
+            VIEW_TYPE_COMMENT_SORT -> CommentSortViewHolder(
+                com.myblbl.databinding.CellCommentSortBinding.inflate(inflater, parent, false),
+                onCommentSortSelected
+            )
+
+            VIEW_TYPE_COMMENT_ENTRY -> CommentEntryViewHolder(
+                com.myblbl.databinding.ItemCommentBinding.inflate(inflater, parent, false),
+                // 第一条评论按"上"回排序行：主列表上一行是 CommentSort 即顶边
+                // （Vh 内置"position==0"判定在主列表恒 false，需注入）
+                isTopEdgeItem = { holder ->
+                    // 内层 Vh 未被主 RecyclerView attach，position 恒 -1；
+                    // 从 itemView 反查外层 CommentEntryViewHolder 的真实位置
+                    val pos = commentEntryPosition(holder)
+                    pos > 0 && getItem(pos - 1) is Row.CommentSort
+                },
+                isBottomEdgeItem = { holder ->
+                    // 主列表末行（末条评论后面无 hint 行时）按"下"消费防飞出
+                    val pos = commentEntryPosition(holder)
+                    pos != RecyclerView.NO_POSITION && pos == itemCount - 1
+                },
+                onCommentTopEdge = { holder -> focusSelectedSortChip(holder) },
+                onCommentItemFocused = onCommentItemFocused
+            )
+
+            VIEW_TYPE_COMMENT_HINT -> {
+                val text = AppCompatTextView(parent.context).apply {
+                    setPadding(
+                        parent.resources.getDimensionPixelSize(R.dimen.px30), 0,
+                        parent.resources.getDimensionPixelSize(R.dimen.px30),
+                        parent.resources.getDimensionPixelSize(R.dimen.px24)
+                    )
+                    setTextColor(ContextCompat.getColor(context, R.color.subTextColor))
+                    setTextSize(0, parent.resources.getDimension(R.dimen.px28))
+                    isFocusable = false
+                    isClickable = false
+                }
+                CommentHintViewHolder(text)
+            }
+
             else -> RelatedLaneViewHolder(
                 CellSeriesLaneBinding.inflate(inflater, parent, false),
-                onRelatedVideoClick
+                onRelatedVideoClick,
+                // 上一行是合集 lane 时（有合集的视频），lane UP 放行系统搜索落合集卡片
+                upperRowIsLane = { holder ->
+                    val pos = holder.bindingAdapterPosition
+                    pos > 0 && getItem(pos - 1) is Row.UgcSeason
+                }
             )
         }
     }
@@ -124,6 +208,19 @@ class VideoDetailContentAdapter(
             is Row.Pages -> (holder as PagesLaneViewHolder).bind(row.items)
             is Row.UgcSeason -> (holder as UgcSeasonLaneViewHolder).bind(row.title, row.items, row.isReverse, row.currentAid)
             is Row.Related -> (holder as RelatedLaneViewHolder).bind(row.items)
+            is Row.TabBar -> (holder as TabBarViewHolder).bind(row.contentTabText, row.commentTabSelected, row.commentCountText)
+            is Row.CommentSort -> (holder as CommentSortViewHolder).bind(row.sortNewSelected)
+            is Row.CommentEntry -> (holder as CommentEntryViewHolder).bind(
+                item = row.item,
+                isExpanded = expandedCommentRpids.contains(row.item.rpid),
+                onToggleExpand = { rpid ->
+                    onCommentToggleExpand(rpid, holder.bindingAdapterPosition)
+                },
+                onClick = onCommentClick,
+                onLongClick = onCommentLongClick,
+                onPictureClick = onCommentPictureClick
+            )
+            is Row.CommentHint -> (holder as CommentHintViewHolder).bind(row.text)
         }
     }
 
@@ -301,31 +398,17 @@ class VideoDetailContentAdapter(
 
             binding.textTitle.text = view.title
 
+            // 数据行：官方手机端样式（播放数/评论数/发布时间/正在看，图标+数字）
             val stat = view.stat
-            val subtitleText = buildString {
-                if (view.pubDate > 0) {
-                    append(context.getString(R.string.adapter_published_at_format, TimeUtils.formatTime(view.pubDate)))
-                }
-                stat?.let { s ->
-                    if (isNotEmpty()) append(" · ")
-                    append(context.getString(R.string.adapter_stat_view_format, formatCount(s.view)))
-                    append(" · ")
-                    append(context.getString(R.string.adapter_stat_danmaku_format, formatCount(s.danmaku)))
-                    if (s.like > 0) {
-                        append(" · ")
-                        append(context.getString(R.string.adapter_stat_like_format, formatCount(s.like)))
-                    }
-                    if (s.coin > 0) {
-                        append(" · ")
-                        append(context.getString(R.string.adapter_stat_coin_format, formatCount(s.coin)))
-                    }
-                    if (s.favorite > 0) {
-                        append(" · ")
-                        append(context.getString(R.string.adapter_stat_favorite_format, formatCount(s.favorite)))
-                    }
-                }
+            binding.textStatView.text = stat?.let { formatCount(it.view) }.orEmpty()
+            binding.textStatReply.text = stat?.let { formatCount(it.reply) }.orEmpty()
+            binding.textStatTime.text = if (view.pubDate > 0) {
+                TimeUtils.formatTime(view.pubDate)
+            } else {
+                ""
             }
-            binding.textSubtitle.text = subtitleText
+            binding.ivStatOnline.visibility = View.GONE
+            binding.textStatOnline.visibility = View.GONE
 
             val owner = view.owner
             if (owner != null) {
@@ -485,6 +568,14 @@ class VideoDetailContentAdapter(
             binding.textFans.text = formatFans(count)
         }
 
+        /** 数据行"正在看"：接口返回 null/开关关闭时不显示（缺字段隐藏整组）。 */
+        fun updateOnlineWatching(text: String) {
+            if (text.isBlank()) return
+            binding.textStatOnline.text = context.getString(R.string.online_watching_format, text)
+            binding.ivStatOnline.visibility = View.VISIBLE
+            binding.textStatOnline.visibility = View.VISIBLE
+        }
+
         private fun showTripleHintIfNeeded() {
             val prefs = context.getSharedPreferences("triple_action_hint", Context.MODE_PRIVATE)
             val today = SimpleDateFormat("yyyyMMdd", Locale.getDefault()).format(Date())
@@ -543,7 +634,16 @@ class VideoDetailContentAdapter(
                 tvFocusController?.onItemFocused(view, position)
             },
             onItemDpad = { view, keyCode, event ->
-                tvFocusController?.handleKey(view, keyCode, event) == true
+                val handled = tvFocusController?.handleKey(view, keyCode, event) == true
+                // 合集卡片按"上"先回本 lane 的正/反序按钮（不再直接飞 Tab 栏）
+                if (!handled &&
+                    keyCode == android.view.KeyEvent.KEYCODE_DPAD_UP &&
+                    event.action == android.view.KeyEvent.ACTION_DOWN
+                ) {
+                    binding.buttonOrder.requestFocus()
+                } else {
+                    false
+                }
             }
         )
         val innerRecyclerView: RecyclerView get() = binding.recyclerView
@@ -571,6 +671,10 @@ class VideoDetailContentAdapter(
             binding.buttonOrder.setOnClickListener {
                 onOrderToggle()
             }
+            // 正/反序按钮按"上"回 Tab 栏（几何搜索会跳过左侧 Tab 直达 Header）
+            binding.buttonOrder.setOnKeyListener { _, keyCode, event ->
+                handleLaneUpExit(itemView, keyCode, event, handledByStrategy = false)
+            }
             videoAdapter.setOnItemClickListener { v, item ->
                 onEpisodeClick(v, item)
             }
@@ -580,7 +684,7 @@ class VideoDetailContentAdapter(
         fun bind(title: String, items: List<VideoModel>, isReverse: Boolean, currentAid: Long) {
             binding.topTitle.text = title
             binding.textOrder.text = binding.root.context.getString(
-                if (isReverse) R.string.positive_sequence else R.string.negative_sequence
+                if (isReverse) R.string.negative_sequence else R.string.positive_sequence
             )
             if (lastIsReverse != isReverse) {
                 lastIsReverse = isReverse
@@ -622,7 +726,9 @@ class VideoDetailContentAdapter(
 
     class RelatedLaneViewHolder(
         private val binding: CellSeriesLaneBinding,
-        onVideoClick: (VideoModel) -> Unit
+        onVideoClick: (VideoModel) -> Unit,
+        // 上一行是否合集 lane（按键时刻实时判定，主列表位置由外层反查）
+        private val upperRowIsLane: (RecyclerView.ViewHolder) -> Boolean
     ) : RecyclerView.ViewHolder(binding.root) {
 
         private var tvFocusController: TvListFocusController? = null
@@ -632,7 +738,10 @@ class VideoDetailContentAdapter(
                 tvFocusController?.onItemFocused(view, position)
             },
             onItemDpad = { view, keyCode, event ->
-                tvFocusController?.handleKey(view, keyCode, event) == true
+                val handled = tvFocusController?.handleKey(view, keyCode, event) == true
+                val upperLane = (itemView.parent as? RecyclerView)
+                    ?.getChildViewHolder(itemView)?.let { upperRowIsLane(it) } == true
+                handleLaneUpExit(itemView, keyCode, event, handled, upperLane)
             }
         )
 
@@ -673,11 +782,80 @@ class VideoDetailContentAdapter(
         }
     }
 
+    /** 评论条按"上"回排序行：聚焦当前选中的排序按钮（热门/最新），几何搜索会飞 Header 标签区。
+     *  排序行在屏外未布局时必须滚动后异步聚焦——UP 已被 keyListener 消费，
+     *  静默返回会让焦点卡死在第一条评论（列表深滚后回顶场景）。 */
+    private fun focusSelectedSortChip(commentHolder: RecyclerView.ViewHolder) {
+        val recyclerView = commentHolder.itemView.parent as? RecyclerView ?: return
+        val position = commentEntryPosition(commentHolder)
+        if (position == RecyclerView.NO_POSITION) return
+        if (getItem(position - 1) !is Row.CommentSort) return
+        focusSortChipAt(recyclerView, position)
+    }
+
+    private fun focusSortChipAt(recyclerView: RecyclerView, position: Int) {
+        val sortRoot = recyclerView.findViewHolderForAdapterPosition(position - 1)?.itemView
+        if (sortRoot != null) {
+            requestSortChipFocus(sortRoot, position)
+            return
+        }
+        // 排序行在屏外：滚过去再聚焦（单次 post，布局同步完成即可命中）
+        recyclerView.scrollToPosition(position - 1)
+        recyclerView.post {
+            recyclerView.findViewHolderForAdapterPosition(position - 1)?.itemView
+                ?.let { requestSortChipFocus(it, position) }
+        }
+    }
+
+    private fun requestSortChipFocus(sortRoot: View, position: Int) {
+        val sortNewSelected = (getItem(position - 1) as Row.CommentSort).sortNewSelected
+        val targetId = if (sortNewSelected) R.id.sort_new else R.id.sort_hot
+        (sortRoot.findViewById<View>(targetId) ?: sortRoot).requestFocus()
+    }
+
+    /** 内层 Vh（未 attach）反查外层评论条目在主列表的真实位置。 */
+    private fun commentEntryPosition(innerHolder: RecyclerView.ViewHolder): Int {
+        val recyclerView = innerHolder.itemView.parent as? RecyclerView ?: return RecyclerView.NO_POSITION
+        val outer = recyclerView.getChildViewHolder(innerHolder.itemView) ?: return RecyclerView.NO_POSITION
+        return outer.bindingAdapterPosition
+    }
+
     companion object {
+        /**
+         * lane 卡片按"上"离开 lane 时的导航。
+         * 上一行是另一 lane（合集 lane→推荐 lane 叠放）时放行系统几何搜索
+         * （正上方就是上一 lane 的卡片，beam 命中稳定）；上一行是 Tab 栏时系统
+         * 搜索会跳过 Tab（Tab 在左侧而卡片横向满屏，正上方是 Header 元素），
+         * 显式交给 Tab 栏。
+         */
+        internal fun handleLaneUpExit(
+            laneItemView: View,
+            keyCode: Int,
+            event: android.view.KeyEvent,
+            handledByStrategy: Boolean,
+            upperRowIsLane: Boolean = false
+        ): Boolean {
+            if (handledByStrategy) return true
+            if (keyCode != android.view.KeyEvent.KEYCODE_DPAD_UP ||
+                event.action != android.view.KeyEvent.ACTION_DOWN
+            ) {
+                return false
+            }
+            // 上一行是另一 lane：放行系统几何搜索，焦点落上一 lane 的卡片
+            if (upperRowIsLane) return false
+            val mainRecyclerView = laneItemView.parent as? RecyclerView ?: return false
+            val tab = mainRecyclerView.findViewById<View>(R.id.tab_content) ?: return false
+            return tab.requestFocus()
+        }
+
         private const val VIEW_TYPE_HEADER = 0
         private const val VIEW_TYPE_PAGES = 1
         private const val VIEW_TYPE_UGC_SEASON = 2
         private const val VIEW_TYPE_RELATED = 3
+        private const val VIEW_TYPE_TAB_BAR = 4
+        private const val VIEW_TYPE_COMMENT_SORT = 5
+        private const val VIEW_TYPE_COMMENT_ENTRY = 6
+        private const val VIEW_TYPE_COMMENT_HINT = 7
 
         internal fun dataChangeReasonFor(oldCount: Int, newCount: Int): TvDataChangeReason {
             return if (oldCount > 0 && newCount > oldCount) {
@@ -720,8 +898,218 @@ class VideoDetailContentAdapter(
                     is Row.Pages -> "pages"
                     is Row.UgcSeason -> "ugc_season"
                     is Row.Related -> "related"
+                    is Row.TabBar -> "tab_bar"
+                    is Row.CommentSort -> "comment_sort"
+                    is Row.CommentEntry -> "comment:${row.item.key}"
+                    is Row.CommentHint -> "comment_hint"
                 }
             }
+        }
+    }
+
+    /**
+     * 内容 Tab 栏。交互对齐首页 tab（实测）：**焦点移动只提亮文字不切选中，
+     * 横条恒跟随选中态，OK/点击激活才移动**（首页 TabLayout 同款：焦点胶囊在热门、
+     * 粉色横条留在选中的推荐下）。横条为单条共享 view，切换时平移动画滑过去
+     * （同首页 SlidingTabStrip 观感）。
+     */
+    class TabBarViewHolder(
+        private val binding: com.myblbl.databinding.CellVideoDetailTabBarBinding,
+        private val onTabSelected: (commentTab: Boolean) -> Unit,
+        // 下一行是否合集 lane（按键时刻实时判定）：是则 tab DOWN 先落正/反序按钮，
+        // 否则放行系统（推荐卡片/评论排序行）
+        private val nextRowIsUgcSeason: (RecyclerView.ViewHolder) -> Boolean
+    ) : RecyclerView.ViewHolder(binding.root) {
+
+        private var commentTabSelected = false
+
+        /** 上一次绑定的选中态：null=首次绑定（横条直接定位），翻转=切换（滑动动画）。 */
+        private var lastSelected: Boolean? = null
+
+        init {
+            binding.tabContent.setOnClickListener { onTabSelected(false) }
+            binding.tabComment.setOnClickListener { onTabSelected(true) }
+            val focusTextRefresher = View.OnFocusChangeListener { _, _ -> applyTextColors() }
+            binding.tabContent.onFocusChangeListener = focusTextRefresher
+            binding.tabComment.onFocusChangeListener = focusTextRefresher
+            val downNavigation = View.OnKeyListener { _, keyCode, event ->
+                if (keyCode != android.view.KeyEvent.KEYCODE_DPAD_DOWN ||
+                    event.action != android.view.KeyEvent.ACTION_DOWN
+                ) {
+                    return@OnKeyListener false
+                }
+                val recyclerView = itemView.parent as? RecyclerView
+                    ?: return@OnKeyListener false
+                val position = bindingAdapterPosition
+                if (position == RecyclerView.NO_POSITION) return@OnKeyListener false
+                if (!nextRowIsUgcSeason(this)) return@OnKeyListener false
+                val laneRoot = recyclerView.findViewHolderForAdapterPosition(position + 1)?.itemView
+                if (laneRoot != null) {
+                    (laneRoot.findViewById<View>(R.id.button_order) ?: laneRoot).requestFocus()
+                } else {
+                    recyclerView.scrollToPosition(position + 1)
+                    recyclerView.post {
+                        recyclerView.findViewHolderForAdapterPosition(position + 1)?.itemView
+                            ?.findViewById<View>(R.id.button_order)?.requestFocus()
+                    }
+                }
+                true
+            }
+            binding.tabContent.setOnKeyListener(downNavigation)
+            binding.tabComment.setOnKeyListener(downNavigation)
+        }
+
+        fun bind(contentTabText: String, commentTabSelected: Boolean, commentCountText: String) {
+            this.commentTabSelected = commentTabSelected
+            binding.textTabContent.text = contentTabText
+            binding.textTabCommentCount.text = commentCountText
+            applyTextColors()
+            // 横条纯选中态：OK 激活切换后才移动；首次/复用定位不动画，状态翻转滑动
+            val animate = lastSelected != null && lastSelected != commentTabSelected
+            lastSelected = commentTabSelected
+            moveIndicator(animate)
+        }
+
+        /** 横条移到选中 tab 下方居中；切换时平移动画。 */
+        private fun moveIndicator(animate: Boolean) {
+            val target = if (commentTabSelected) binding.tabComment else binding.tabContent
+            binding.root.post {
+                val indicator = binding.tabIndicator
+                if (indicator.width <= 0 || target.width <= 0) {
+                    indicator.translationX = target.left.toFloat()
+                    return@post
+                }
+                val center = target.left + (target.width - indicator.width) / 2f
+                if (animate) {
+                    // 250ms 对齐首页 TabLayout 指示器滑动观感
+                    indicator.animate().translationX(center).setDuration(250L).start()
+                } else {
+                    indicator.animate().cancel()
+                    indicator.translationX = center
+                }
+            }
+        }
+
+        /** 焦点 tab 文字提亮白（同首页惯例）；失焦按各自选中态取色。 */
+        private fun applyTextColors() {
+            val context = binding.root.context
+            val focusedColor = ContextCompat.getColor(context, R.color.textColor)
+            val unselectedColor = ContextCompat.getColor(context, R.color.subTextColor)
+            binding.textTabContent.setTextColor(
+                when {
+                    binding.tabContent.hasFocus() -> focusedColor
+                    !commentTabSelected -> focusedColor
+                    else -> unselectedColor
+                }
+            )
+            binding.textTabComment.setTextColor(
+                when {
+                    binding.tabComment.hasFocus() -> focusedColor
+                    commentTabSelected -> focusedColor
+                    else -> unselectedColor
+                }
+            )
+            binding.textTabCommentCount.setTextColor(
+                when {
+                    binding.tabComment.hasFocus() -> focusedColor
+                    commentTabSelected -> ContextCompat.getColor(context, R.color.pink)
+                    else -> unselectedColor
+                }
+            )
+        }
+    }
+
+    /** 评论区排序行：焦点只高亮不切换，OK/点击才切换（对齐播放页评论面板惯例）。 */
+    class CommentSortViewHolder(
+        private val binding: com.myblbl.databinding.CellCommentSortBinding,
+        private val onSortSelected: (sortNew: Boolean) -> Unit
+    ) : RecyclerView.ViewHolder(binding.root) {
+
+        init {
+            binding.sortHot.setOnClickListener { onSortSelected(false) }
+            binding.sortNew.setOnClickListener { onSortSelected(true) }
+            // 按"下"显式落第一条评论：评论条目在屏外/未布局时系统几何搜索会飞到
+            // Header 标签区（实测 UP 反向同病），主列表内显式导航兜住
+            val downKeyListener = View.OnKeyListener { _, keyCode, event ->
+                if (keyCode != android.view.KeyEvent.KEYCODE_DPAD_DOWN ||
+                    event.action != android.view.KeyEvent.ACTION_DOWN
+                ) {
+                    return@OnKeyListener false
+                }
+                val recyclerView = itemView.parent as? RecyclerView
+                    ?: return@OnKeyListener false
+                val position = bindingAdapterPosition
+                if (position == RecyclerView.NO_POSITION) return@OnKeyListener false
+                val next = recyclerView.findViewHolderForAdapterPosition(position + 1)?.itemView
+                if (next != null && next.requestFocus()) {
+                    return@OnKeyListener true
+                }
+                // 目标未布局（屏外）：滚过去再聚焦；加载中无评论时消费防飞出
+                recyclerView.scrollToPosition(position + 1)
+                recyclerView.post {
+                    recyclerView.findViewHolderForAdapterPosition(position + 1)?.itemView?.requestFocus()
+                }
+                true
+            }
+            binding.sortHot.setOnKeyListener(downKeyListener)
+            binding.sortNew.setOnKeyListener(downKeyListener)
+        }
+
+        fun bind(sortNewSelected: Boolean) {
+            val selected = ContextCompat.getColor(binding.root.context, R.color.textColor)
+            val unselected = ContextCompat.getColor(binding.root.context, R.color.subTextColor)
+            binding.sortHot.isSelected = !sortNewSelected
+            binding.sortNew.isSelected = sortNewSelected
+            binding.sortHot.setTextColor(if (sortNewSelected) unselected else selected)
+            binding.sortNew.setTextColor(if (sortNewSelected) selected else unselected)
+        }
+    }
+
+    /** 评论条：直接复用播放页评论面板的 [VideoCommentsAdapter.Vh] 渲染（表情/图片/展开收起/楼中楼预览全套）。 */
+    class CommentEntryViewHolder(
+        binding: com.myblbl.databinding.ItemCommentBinding,
+        isTopEdgeItem: (RecyclerView.ViewHolder) -> Boolean,
+        isBottomEdgeItem: (RecyclerView.ViewHolder) -> Boolean,
+        onCommentTopEdge: (RecyclerView.ViewHolder) -> Unit,
+        private val onCommentItemFocused: () -> Unit
+    ) : RecyclerView.ViewHolder(binding.root) {
+
+        private val vh = VideoCommentsAdapter.Vh(
+            binding,
+            onTopEdge = { onCommentTopEdge(this) },
+            isTopEdgeItem = isTopEdgeItem,
+            isBottomEdgeItem = isBottomEdgeItem
+        )
+
+        fun bind(
+            item: com.myblbl.feature.player.comment.VideoCommentItem,
+            isExpanded: Boolean,
+            onToggleExpand: (Long) -> Unit,
+            onClick: (com.myblbl.feature.player.comment.VideoCommentItem) -> Unit,
+            onLongClick: (com.myblbl.feature.player.comment.VideoCommentItem) -> Boolean,
+            onPictureClick: (com.myblbl.feature.player.comment.VideoCommentItem, Int) -> Unit
+        ) {
+            vh.bind(
+                item = item,
+                isExpanded = isExpanded,
+                expandFully = false,
+                onToggleExpand = onToggleExpand,
+                onClick = onClick,
+                onTouchClick = {},
+                onPictureClick = onPictureClick,
+                onLongClick = onLongClick,
+                onItemFocused = onCommentItemFocused
+            )
+        }
+    }
+
+    /** 评论区状态提示行（加载中/空/失败），纯展示不可聚焦。 */
+    class CommentHintViewHolder(
+        private val text: AppCompatTextView
+    ) : RecyclerView.ViewHolder(text) {
+
+        fun bind(value: String) {
+            text.text = value
         }
     }
 }

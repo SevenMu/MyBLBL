@@ -1,6 +1,7 @@
 package com.myblbl.repository
 
 import com.myblbl.model.search.HotWordModel
+import com.myblbl.model.search.SearchDefaultModel
 import com.myblbl.model.search.SearchType
 import com.myblbl.model.search.SearchVideoOrder
 import com.myblbl.repository.remote.SearchRepository as NetworkSearchRepository
@@ -9,6 +10,8 @@ class SearchRepository(
     private val delegate: NetworkSearchRepository
 ) {
     suspend fun loadHotSearchWords(): Result<List<HotWordModel>> = delegate.loadHotSearchWords()
+
+    suspend fun loadSearchDefault(): Result<SearchDefaultModel?> = delegate.loadSearchDefault()
 
     suspend fun searchSuggest(keyword: String): Result<List<HotWordModel>> = delegate.searchSuggest(keyword)
 

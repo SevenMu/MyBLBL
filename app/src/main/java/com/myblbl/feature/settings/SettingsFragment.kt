@@ -30,6 +30,8 @@ import com.myblbl.R
 import com.myblbl.core.common.media.VideoCodecSupport
 import com.myblbl.core.common.update.ApkUpdater
 import com.myblbl.databinding.FragmentSettingsBinding
+import com.myblbl.feature.cast.NvaCastController
+import com.myblbl.feature.cast.NvaDevice
 import com.myblbl.feature.home.FeedSourceSetting
 import com.myblbl.model.SettingModel
 import com.myblbl.ui.adapter.SettingAdapter
@@ -44,6 +46,7 @@ import com.myblbl.core.ui.base.UiTextScale
 import com.myblbl.core.ui.base.UiScale
 import com.myblbl.core.ui.decoration.LinearSpacingItemDecoration
 import com.myblbl.core.ui.decoration.SettingGroupSpacingDecoration
+import com.myblbl.core.ui.focus.EdgeTabSwitch
 import com.myblbl.core.common.log.AppLog
 import com.myblbl.core.common.cache.FileCacheManager
 import com.myblbl.core.common.settings.AppSettingsDataStore
@@ -61,12 +64,12 @@ import com.myblbl.feature.player.view.MyPlayerSettingView
 import com.myblbl.core.common.ext.normalizeDanmakuSmartFilterValue
 import com.myblbl.core.common.ext.localizedSettingLabel
 import com.myblbl.network.cookie.CookieManager
-import com.myblbl.event.AppEventHub
-import com.myblbl.feature.home.HomeRegionCatalog
-import com.myblbl.ui.adapter.RegionMultiChoiceAdapter
 import com.myblbl.ui.activity.MainActivity
 import com.myblbl.ui.activity.GaiaVgateActivity
 import com.myblbl.ui.dialog.UpdateFlowDialog
+import com.myblbl.event.AppEventHub
+import com.myblbl.feature.home.HomeRegionCatalog
+import com.myblbl.ui.adapter.RegionMultiChoiceAdapter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -90,8 +93,9 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>(), OnBackPressedH
         private const val CATEGORY_PLAY = 2
         private const val CATEGORY_PLAYER_UI = 3
         private const val CATEGORY_DM = 4
-        private const val CATEGORY_TEEN = 5
-        private const val CATEGORY_ABOUT = 6
+        private const val CATEGORY_TV = 5
+        private const val CATEGORY_TEEN = 6
+        private const val CATEGORY_ABOUT = 7
 
         private const val KEY_CACHE_LIMIT = "cache_limit"
         private const val KEY_DEFAULT_START_PAGE = "default_start_page"
@@ -101,8 +105,18 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>(), OnBackPressedH
         private const val KEY_IMAGE_QUALITY = "image_quality"
         private const val KEY_THEME = "theme"
         private const val KEY_LIVE_ENTRY = "live_entry"
+        // 与 EdgeTabSwitch 同键（存储值"开/关"），默认开：卡片左右移到列表边缘切换顶部 tab
+        private const val KEY_EDGE_TAB_SWITCH = EdgeTabSwitch.KEY
         private const val KEY_CCTV_LIVE_ENTRY = "cctv_live_entry"
         private const val KEY_CCTV_VOD_ENTRY = "cctv_vod_entry"
+        // CCTV直播极速模式开关（issue#106 阶段二，显示名「直播极速模式」）：
+        // vdn 直调+H5e 原生解密+ExoPlayer，关闭后回退 WebView 自构 HTML 老路径（X5 内核即在该路径生效）。默认开。
+        private const val KEY_CCTV_NATIVE_LIVE = "cctv_native_live"
+        // CCTV影视极速模式开关（显示名「影视极速模式」）：getHttpVideoInfo h5e 流直连+
+        // H5e 原生解密（同 wasm 的 jsdecVOD 入口系列），关闭后回退官方页 WebView。默认开。
+        private const val KEY_CCTV_NATIVE_VOD = "cctv_native_vod"
+        private const val KEY_CAST_RECEIVE = "cast_receive"
+        private const val KEY_CAST_DEVICE_NAME = "cast_device_name"
         private const val KEY_MINOR_PROTECTION = "minor_protection"
         private const val KEY_WATCH_TIME_LIMIT = "teen_watch_limit_min"
         private const val KEY_REST_TIME_LIMIT = "teen_rest_limit_min"
@@ -122,6 +136,8 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>(), OnBackPressedH
         private const val KEY_SHOW_CHAPTER_BAR = "show_chapter_bar"
         // 与 PlayerSettingsStore.KEY_SHOW_LIVE_SUPER_CHAT 同键（存储值"开/关"），默认开。
         private const val KEY_SHOW_LIVE_SUPER_CHAT = "show_live_super_chat"
+        // 与 PlayerSettingsStore.KEY_SHOW_ALWAYS_ON_CLOCK 同键（存储值"开/关"），默认关。
+        private const val KEY_SHOW_ALWAYS_ON_CLOCK = "show_always_on_clock"
         private const val KEY_SUBTITLE_DEFAULT_MODE = "subtitle_default_mode"
         private const val KEY_SUBTITLE_TEXT_SIZE = "subtitle_text_size"
         private const val KEY_SHOW_VIDEO_DETAIL = "show_video_detail"
@@ -152,6 +168,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>(), OnBackPressedH
         private const val KEY_DOUYIN_MODE = "douyin_mode"
         private const val KEY_RESUME_PLAYBACK = "resume_playback"
         private const val KEY_SPONSOR_BLOCK_ENABLED = "sponsor_block_enabled"
+        private const val KEY_SKIP_OFFICIAL_OP_ED = "skip_official_op_ed"
         private const val KEY_AUDIO_NORMALIZE_LEGACY = "audio_normalize"
         private const val KEY_AUDIO_BALANCE = "audio_balance"
         private val AUDIO_BALANCE_OPTIONS = arrayOf("关", "低", "中", "高")
@@ -201,6 +218,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>(), OnBackPressedH
     private lateinit var playerGroups: List<SettingGroup>
     private lateinit var playerUiGroups: List<SettingGroup>
     private lateinit var dmGroups: List<SettingGroup>
+    private lateinit var tvGroups: List<SettingGroup>
     private lateinit var teenGroups: List<SettingGroup>
     private lateinit var aboutGroups: List<SettingGroup>
     private val appSettings: AppSettingsDataStore by inject()
@@ -280,8 +298,12 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>(), OnBackPressedH
                 stored(KEY_HOME_FEED_SOURCE, R.string.home_feed_source, FeedSourceSetting.DEFAULT),
                 stored(KEY_HOT_FEED_SOURCE, R.string.hot_feed_source, FeedSourceSetting.DEFAULT),
                 stored(KEY_LIVE_ENTRY, R.string.live_entry, "关"),
-                stored(KEY_CCTV_LIVE_ENTRY, R.string.cctv_live, "关"),
-                stored(KEY_CCTV_VOD_ENTRY, R.string.cctv_vod, "关")
+                stored(KEY_EDGE_TAB_SWITCH, R.string.edge_tab_switch, "开"),
+                // CCTV 相关条目已归入「电视直播」分类（tvGroups）
+                // 投屏开关默认值直接读 cast 自有存储（不进 appSettings，冷启动即可读），
+                // 因此无需在 applyStored 段恢复
+                stored(KEY_CAST_RECEIVE, R.string.cast_receive, NvaDevice.receiveEnabledStored(requireContext())),
+                plain(KEY_CAST_DEVICE_NAME, R.string.cast_device_name, NvaDevice.displayName(requireContext()))
             )),
             SettingGroup(R.string.setting_group_interact, listOf(
                 stored(KEY_SHOW_VIDEO_DETAIL, R.string.show_video_detail_page, "关"),
@@ -330,6 +352,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>(), OnBackPressedH
             )),
             SettingGroup(R.string.setting_group_play_behavior, listOf(
                 stored(KEY_RESUME_PLAYBACK, R.string.resume_playback, "开"),
+                stored(KEY_SKIP_OFFICIAL_OP_ED, R.string.skip_official_op_ed, "开"),
                 stored(KEY_AFTER_PLAY, R.string.after_play, "播推荐视频"),
                 stored(KEY_PLAY_FINISH_EXIT_PLAYER, R.string.play_finish_exit_player, "开")
             )),
@@ -352,7 +375,8 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>(), OnBackPressedH
                 stored(KEY_SHOW_BOTTOM_PROGRESS_BAR, R.string.show_bottom_progress_bar, "关"),
                 stored(KEY_SHOW_CHAPTER_BAR, R.string.show_chapter_bar, "关"),
                 stored(KEY_SHOW_ONLINE_WATCHING, R.string.show_online_watching, "开"),
-                stored(KEY_SHOW_LIVE_SUPER_CHAT, R.string.show_live_super_chat, "开")
+                stored(KEY_SHOW_LIVE_SUPER_CHAT, R.string.show_live_super_chat, "开"),
+                stored(KEY_SHOW_ALWAYS_ON_CLOCK, R.string.show_always_on_clock, "关")
             )),
             SettingGroup(R.string.setting_group_controls, listOf(
                 stored(KEY_SHOW_NEXT_PREVIOUS, R.string.show_next_previous, "关"),
@@ -386,6 +410,21 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>(), OnBackPressedH
             ))
         )
 
+        // 电视直播：CCTV 直播（入口/极速模式/X5 内核）/ CCTV 影视
+        // X5 内核只服务于直播 WebView 路径（极速模式关闭时的兜底，以及央视频超清组整页播放），
+        // 因此从「关于·组件与诊断」归入本分类，与极速模式放一组形成语义衔接。
+        tvGroups = listOf(
+            SettingGroup(R.string.setting_group_tv_live, listOf(
+                stored(KEY_CCTV_LIVE_ENTRY, R.string.cctv_live, "关"),
+                stored(KEY_CCTV_NATIVE_LIVE, R.string.cctv_native_live, "开"),
+                plain(KEY_X5_CORE, R.string.x5_core_replace, getString(R.string.x5_status_not_installed))
+            )),
+            SettingGroup(R.string.setting_group_tv_vod, listOf(
+                stored(KEY_CCTV_VOD_ENTRY, R.string.cctv_vod, "关"),
+                stored(KEY_CCTV_NATIVE_VOD, R.string.cctv_native_vod, "开")
+            ))
+        )
+
         // 青少年模式：时间限制 / 公益广告
         teenGroups = listOf(
             SettingGroup(R.string.setting_group_teen_time, listOf(
@@ -408,7 +447,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>(), OnBackPressedH
                 // plain(KEY_USAGE_TIPS, R.string.usage_tips)
             )),
             SettingGroup(R.string.setting_group_diagnostics, listOf(
-                plain(KEY_X5_CORE, R.string.x5_core_replace, getString(R.string.x5_status_not_installed)),
+                // X5 内核已归入「电视直播」分类（只服务于直播 WebView 路径）
                 plain(KEY_LOG_RECORD, R.string.log_record, getString(if (AppLog.isEnabled) R.string.on else R.string.off)),
                 plain(KEY_LAN_LOG, R.string.lan_log)
             )),
@@ -451,6 +490,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>(), OnBackPressedH
         CATEGORY_PLAY -> playerGroups
         CATEGORY_PLAYER_UI -> playerUiGroups
         CATEGORY_DM -> dmGroups
+        CATEGORY_TV -> tvGroups
         CATEGORY_TEEN -> teenGroups
         else -> aboutGroups
     }
@@ -476,7 +516,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>(), OnBackPressedH
     /** 全部分类中按 key 找条目（key 全局唯一，调换分组/顺序不影响寻址）。 */
     private fun itemOf(key: String): SettingModel? {
         sequenceOf(
-            commonGroups, displayGroups, playerGroups, playerUiGroups, dmGroups, teenGroups, aboutGroups
+            commonGroups, displayGroups, playerGroups, playerUiGroups, dmGroups, tvGroups, teenGroups, aboutGroups
         ).forEach { groups ->
             groups.forEach { group ->
                 group.items.forEach { if (it.key == key) return it }
@@ -565,6 +605,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>(), OnBackPressedH
         binding.buttonSettingPlay.setOnClickListener { showCategory(CATEGORY_PLAY) }
         binding.buttonSettingPlayerUi.setOnClickListener { showCategory(CATEGORY_PLAYER_UI) }
         binding.buttonSettingDm.setOnClickListener { showCategory(CATEGORY_DM) }
+        binding.buttonSettingTv.setOnClickListener { showCategory(CATEGORY_TV) }
         binding.buttonSettingTeen.setOnClickListener { showCategory(CATEGORY_TEEN) }
         binding.buttonSettingAbout.setOnClickListener { showCategory(CATEGORY_ABOUT) }
         // 左列分类按钮按右键：焦点进入右侧列表首条，避免几何搜索落到就近条目
@@ -584,6 +625,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>(), OnBackPressedH
         CATEGORY_PLAY -> binding.buttonSettingPlay
         CATEGORY_PLAYER_UI -> binding.buttonSettingPlayerUi
         CATEGORY_DM -> binding.buttonSettingDm
+        CATEGORY_TV -> binding.buttonSettingTv
         CATEGORY_TEEN -> binding.buttonSettingTeen
         else -> binding.buttonSettingAbout
     }
@@ -665,6 +707,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>(), OnBackPressedH
         binding.buttonSettingPlay.isSelected = category == CATEGORY_PLAY
         binding.buttonSettingPlayerUi.isSelected = category == CATEGORY_PLAYER_UI
         binding.buttonSettingDm.isSelected = category == CATEGORY_DM
+        binding.buttonSettingTv.isSelected = category == CATEGORY_TV
         binding.buttonSettingTeen.isSelected = category == CATEGORY_TEEN
         binding.buttonSettingAbout.isSelected = category == CATEGORY_ABOUT
         val buttons = listOf(
@@ -673,6 +716,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>(), OnBackPressedH
             binding.buttonSettingPlay,
             binding.buttonSettingPlayerUi,
             binding.buttonSettingDm,
+            binding.buttonSettingTv,
             binding.buttonSettingTeen,
             binding.buttonSettingAbout
         )
@@ -706,14 +750,24 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>(), OnBackPressedH
                 appSettings.putStringAsync(key, it)
                 (activity as? MainActivity)?.applyLiveEntryVisibility()
             }
+            KEY_EDGE_TAB_SWITCH -> toggle(key)
+            // —— 电视直播 ——
             KEY_CCTV_LIVE_ENTRY -> toggle(key) {
                 appSettings.putStringAsync(key, it)
                 (activity as? MainActivity)?.applyCctvLiveEntryVisibility()
             }
+            KEY_CCTV_NATIVE_LIVE -> toggle(key)
             KEY_CCTV_VOD_ENTRY -> toggle(key) {
                 appSettings.putStringAsync(key, it)
                 (activity as? MainActivity)?.applyCctvVodEntryVisibility()
             }
+            KEY_CCTV_NATIVE_VOD -> toggle(key)
+            KEY_X5_CORE -> startXdDownload()
+            KEY_CAST_RECEIVE -> toggle(key) { newValue ->
+                // 投屏开关存 cast 自有 SP（不进 appSettings），并立即生效（拉起/停止服务）
+                NvaCastController.setEnabled(requireContext(), newValue == "开")
+            }
+            KEY_CAST_DEVICE_NAME -> showCastDeviceNameDialog()
             KEY_SHOW_VIDEO_DETAIL -> toggle(key)
             KEY_DOUYIN_MODE -> toggle(key)
             KEY_GIVE_COIN_NUMBER -> showCommonChoiceDialog(key, arrayOf("1", "2"))
@@ -745,8 +799,10 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>(), OnBackPressedH
             KEY_SHOW_ONLINE_WATCHING -> toggle(key)
             KEY_SHOW_LIVE_SUPER_CHAT -> toggle(key)
             KEY_SHOW_CHAPTER_BAR -> toggle(key)
+            KEY_SHOW_ALWAYS_ON_CLOCK -> toggle(key)
             // —— 播放·播放行为 ——
             KEY_RESUME_PLAYBACK -> toggle(key)
+            KEY_SKIP_OFFICIAL_OP_ED -> toggle(key)
             KEY_AFTER_PLAY -> showPlayerChoiceDialog(key, arrayOf("什么都不做", "播推荐视频", "播列表中的下一个", "播放合集中的下一个"))
             KEY_PLAY_FINISH_EXIT_PLAYER -> toggle(key)
             KEY_SPONSOR_BLOCK_ENABLED -> toggleSponsorBlock()
@@ -795,7 +851,6 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>(), OnBackPressedH
             // —— 关于 ——
             KEY_CHECK_UPDATE -> checkForUpdate()
             KEY_USAGE_TIPS -> showUsageTipsDialog()
-            KEY_X5_CORE -> startXdDownload()
             KEY_LOG_RECORD -> {
                 val newValue = if (AppLog.isEnabled) "关" else "开"
                 AppLog.setEnabled(newValue == "开")
@@ -1161,7 +1216,6 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>(), OnBackPressedH
                     UpdateFlowDialog.showConfirmDialog(
                         context = requireContext(),
                         releaseInfo = releaseInfo,
-                        scope = updateScope,
                         listener = UpdateFlowDialog.Listener {
                             updateCheckState.value = UpdateCheckState.Idle
                             updateUpdateEntry()
@@ -1196,7 +1250,8 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>(), OnBackPressedH
 
     override fun onDestroyView() {
         super.onDestroyView()
-        // 下载 job 挂在 updateScope 上（UpdateFlowDialog），取消 scope 即连带取消
+        // updateScope 只承载检查更新请求；下载 job 已归 UpdateFlowDialog 自有应用级
+        // scope，离开设置页不中断下载（进度弹窗转后台同理）
         updateScope.cancel()
     }
 
@@ -1306,8 +1361,11 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>(), OnBackPressedH
             }
         }
         applyStored(KEY_LIVE_ENTRY)
+        applyStored(KEY_EDGE_TAB_SWITCH)
         applyStored(KEY_CCTV_LIVE_ENTRY)
+        applyStored(KEY_CCTV_NATIVE_LIVE)
         applyStored(KEY_CCTV_VOD_ENTRY)
+        applyStored(KEY_CCTV_NATIVE_VOD)
         applyStored(KEY_HOME_FEED_SOURCE)
         applyStored(KEY_HOT_FEED_SOURCE)
         // 旧版本存储值兜底：不属于当前选项集时回落默认
@@ -1377,6 +1435,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>(), OnBackPressedH
         applyStored(KEY_SHOW_BOTTOM_PROGRESS_BAR)
         applyStored(KEY_SHOW_ONLINE_WATCHING)
         applyStored(KEY_SHOW_LIVE_SUPER_CHAT)
+        applyStored(KEY_SHOW_ALWAYS_ON_CLOCK)
         applyStored(KEY_SHOW_NEXT_PREVIOUS)
         applyStored(KEY_SHOW_PLAY_SPEED_BUTTON)
         applyStored(KEY_SHOW_PLAYBACK_RATE)
@@ -1403,7 +1462,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>(), OnBackPressedH
         applyStored(KEY_DM_SMART_SHIELD)
         applyStored(KEY_DM_MERGE_DUPLICATE)
 
-        // —— 关于 ——
+        // —— 电视直播（X5 状态刷新）——
         updateX5Status()
     }
 
@@ -2065,6 +2124,161 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>(), OnBackPressedH
         )
         dialog.show()
         actionContainer.getChildAt(0)?.requestFocus()
+    }
+
+    /** 投屏设备名输入弹窗：保存后立即重播 SSDP 通知，手机投屏列表无需重启即更新。 */
+    private fun showCastDeviceNameDialog() {
+        val px40 = resources.getDimensionPixelSize(R.dimen.px40)
+        val px35 = resources.getDimensionPixelSize(R.dimen.px35)
+        val px20 = resources.getDimensionPixelSize(R.dimen.px20)
+        val px18 = resources.getDimensionPixelSize(R.dimen.px18)
+        val px16 = resources.getDimensionPixelSize(R.dimen.px16)
+        val px14 = resources.getDimensionPixelSize(R.dimen.px14)
+        val px10 = resources.getDimensionPixelSize(R.dimen.px10)
+        val textColor = resources.getColor(R.color.textColor, null)
+
+        val dialog = AppCompatDialog(requireContext(), R.style.DialogTheme)
+        dialog.setCanceledOnTouchOutside(true)
+
+        val root = LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundResource(R.drawable.dialog_background)
+        }
+
+        root.addView(ScaledTextView(requireContext()).apply {
+            text = getString(R.string.cast_device_name)
+            setTextColor(textColor)
+            setTextSize(TypedValue.COMPLEX_UNIT_PX, resources.getDimension(R.dimen.px36))
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            lp.setMargins(px40, px35, px40, px20)
+            layoutParams = lp
+        })
+
+        root.addView(View(requireContext()).apply {
+            setBackgroundColor(0x1FFFFFFF)
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, resources.getDimensionPixelSize(R.dimen.px2))
+            lp.setMargins(px18, 0, px18, 0)
+            layoutParams = lp
+        })
+
+        // 手机端对设备名有前缀校验（必须「我的小电视」开头），本模块自动补前缀，
+        // 用户只填区分名（如「客厅」），提示里说明最终显示形态。
+        root.addView(ScaledTextView(requireContext()).apply {
+            text = getString(R.string.cast_device_name_hint)
+            setTextColor(0x99FFFFFF.toInt())
+            setTextSize(TypedValue.COMPLEX_UNIT_PX, resources.getDimension(R.dimen.px26))
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            lp.setMargins(px40, px20, px40, 0)
+            layoutParams = lp
+        })
+
+        val editTextId = View.generateViewId()
+        val firstActionId = View.generateViewId()
+        val editText = EditText(requireContext()).apply {
+            id = editTextId
+            hint = getString(R.string.cast_device_name_hint_example)
+            inputType = EditorInfo.TYPE_CLASS_TEXT
+            setText(NvaDevice.savedName(requireContext()))
+            setTextColor(textColor)
+            setHintTextColor(0x80FFFFFF.toInt())
+            setTextSize(TypedValue.COMPLEX_UNIT_PX, resources.getDimension(R.dimen.px30))
+            setPadding(px16, px16, px16, px16)
+            setBackgroundResource(R.drawable.bg_search_input)
+            nextFocusDownId = firstActionId
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, resources.getDimensionPixelSize(R.dimen.px150))
+            lp.setMargins(px40, px20, px40, 0)
+            layoutParams = lp
+        }
+        root.addView(editText)
+
+        val actionContainer = LinearLayout(requireContext()).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.END
+            val lp = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT)
+            lp.setMargins(px18, px20, px18, px18)
+            layoutParams = lp
+        }
+
+        fun saveDeviceName() {
+            val raw = editText.text?.toString()?.trim().orEmpty()
+            if (raw.isEmpty()) {
+                AppToast.show(requireContext(), getString(R.string.cast_device_name_empty))
+                return
+            }
+            applyCastDeviceName(raw)
+            dialog.dismiss()
+        }
+
+        listOf(getString(R.string.cast_device_name_reset) to {
+                NvaDevice.setFriendlyName(requireContext(), NvaDevice.DEFAULT_FRIENDLY_NAME)
+                applyCastDeviceChanged()
+                dialog.dismiss()
+            },
+               getString(R.string.cancel) to { dialog.dismiss() },
+               getString(R.string.confirm_save) to { saveDeviceName() }).forEachIndexed { index, (text, action) ->
+            actionContainer.addView(ScaledTextView(requireContext()).apply {
+                this.text = text
+                setTextColor(textColor)
+                setTextSize(TypedValue.COMPLEX_UNIT_PX, resources.getDimension(R.dimen.px32))
+                setPadding(px16, px14, px16, px14)
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { action() }
+                setBackgroundResource(R.drawable.bg_dialog_button)
+                if (index == 0) {
+                    id = firstActionId
+                    nextFocusUpId = editTextId
+                }
+            }, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                setMargins(px10, 0, px10, 0)
+            })
+        }
+
+        editText.setOnKeyListener { _, keyCode, event ->
+            if (keyCode == KeyEvent.KEYCODE_DPAD_DOWN && event.action == KeyEvent.ACTION_DOWN) {
+                actionContainer.getChildAt(0)?.requestFocus()
+                true
+            } else {
+                false
+            }
+        }
+
+        root.addView(actionContainer)
+        DialogWindowFit.overlay(
+            dialog,
+            DialogWindowFit.wrapContentInScroll(requireContext(), root),
+            resources.getDimensionPixelSize(R.dimen.px800),
+            tag = "castDeviceName"
+        )
+        dialog.setOnShowListener { editText.requestFocus() }
+        dialog.show()
+    }
+
+    /**
+     * 写入设备名并让新广播立即生效。
+     *
+     * 三件事缺一不可：写 prefs（描述文档按它生成）→ 递增 BOOTID（手机端才会丢弃旧描述缓存）
+     * → 重播 SSDP 通知（新名字不必等下一轮 3 秒）。注意**不重建 socket**，
+     * 否则 1900 端口没及时释放会导致这台电视直接搜不到。
+     */
+    private fun applyCastDeviceName(rawName: String) {
+        val name = NvaDevice.normalizeFriendlyName(rawName).take(NvaDevice.MAX_FRIENDLY_NAME_LENGTH)
+        if (name.isBlank()) {
+            AppToast.show(requireContext(), getString(R.string.cast_device_name_empty))
+            return
+        }
+        NvaDevice.setFriendlyName(requireContext(), name)
+        applyCastDeviceChanged()
+    }
+
+    /** 名称已写入后的共同收尾：重播广播 + 更新设置条目显示 + Toast 告知最终显示名。 */
+    private fun applyCastDeviceChanged() {
+        NvaCastController.get()?.onDeviceNameChanged()
+        val shown = NvaDevice.displayName(requireContext())
+        updateInfo(KEY_CAST_DEVICE_NAME, shown)
+        AppLog.i("SettingsCast", "投屏设备名称已改，手机端显示为「$shown」")
+        AppToast.show(requireContext(), getString(R.string.cast_device_name_applied, shown))
     }
 
     private fun showGaiaVgateVoucherDialog() {

@@ -4,6 +4,8 @@ package com.myblbl.network.security
 
 import com.myblbl.core.common.coroutine.catchingRequest
 
+import com.myblbl.core.common.coroutine.catchingRequest
+
 import android.util.Base64
 import com.myblbl.model.BaseResponse
 import com.myblbl.model.user.UserDetailInfoModel

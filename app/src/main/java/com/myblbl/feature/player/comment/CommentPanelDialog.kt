@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.view.Gravity
+import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewTreeObserver
@@ -33,7 +34,8 @@ import com.myblbl.core.ui.base.AppToast
  * 视频评论面板：贴屏幕右侧的竖版弹窗（对齐合集选集弹窗形态）。
  * 根评论列表与楼中楼两个 RecyclerView 复用同一 Adapter 与 RecycledViewPool，
  * 排序 tab（热门/最新）焦点联动切换；BACK 分层返回：
- * 图片查看器 → 楼中楼回根列表（聚焦原评论）→ 关面板。
+ * 图片查看器 → 楼中楼回根列表（聚焦原评论）→ 关面板；
+ * 详情页 initialThreadRpid 直达楼中楼时根列表层不存在，BACK/X 直接关面板回来源页。
  *
  * 加载语义对齐 blbl.cat3399.feature.video.comment.VideoCommentsPanelController
  * （token 竞态防护、endReached、fallbackTotalCount）；触底加载挂三处：
@@ -44,7 +46,12 @@ internal class CommentPanelDialog(
     private val aid: Long,
     private val upMid: Long,
     private val commentCount: Long,
+    /** 焦点在评论条目上按菜单键：打开该用户的主页弹窗（调用方负责先关本面板）。 */
+    private val onOpenOwnerSpace: (VideoCommentItem) -> Unit,
     private val onDismissed: () -> Unit,
+    /** >0：showPanel 后直达该根评论的楼中楼（详情页评论 tab 点评论条进入）。
+     *  直达模式下用户没经过根列表，BACK/X 直接关面板回来源页，不插入根列表一层。 */
+    private val initialThreadRpid: Long = 0L,
 ) : AppCompatDialog(activity, R.style.DialogTheme) {
 
     companion object {
@@ -66,6 +73,9 @@ internal class CommentPanelDialog(
     private var threadFetchJob: Job? = null
     private var threadFetchToken: Int = 0
     private val threadState = VideoCommentThreadPagingState()
+
+    /** 当前楼中楼是 initialThreadRpid 直达进入（未经过根列表）——BACK/X 直接关面板。 */
+    private var threadEnteredDirectly = false
 
     private val commentsAdapter: VideoCommentsAdapter
     private val threadAdapter: VideoCommentsAdapter
@@ -90,13 +100,15 @@ internal class CommentPanelDialog(
             onDismissed()
         }
 
-        // 楼中楼的 X 只退评论详情回根列表（同 BACK 一层），不关整个面板
+        // 楼中楼的 X 与 BACK 同语义：直达模式关整个面板回来源页，普通模式只退评论详情回根列表
         binding.buttonClose.setOnClickListener {
-            if (imageViewer.isViewing) {
-                imageViewer.dismiss()
-            } else {
-                showRoot()
-                focusRoot(threadState.consumeReturnFocusRpid())
+            when {
+                imageViewer.isViewing -> imageViewer.dismiss()
+                threadEnteredDirectly -> this@CommentPanelDialog.cancel()
+                else -> {
+                    showRoot()
+                    focusRoot(threadState.consumeReturnFocusRpid())
+                }
             }
         }
 
@@ -190,9 +202,22 @@ internal class CommentPanelDialog(
         if (aid > 0L) {
             reloadComments()
         }
+        // 直达楼中楼：面板根列表照常后台加载，焦点交给楼中楼列表；
+        // 直达模式用户没经过根列表，BACK/X 直接关面板回来源页
+        if (initialThreadRpid > 0L) {
+            openThread(initialThreadRpid, direct = true)
+        }
 
         // 初始焦点：优先列表首项，空列表/加载失败落排序 tab；窗口焦点监听 + post 双兜底
         fun requestInitialFocus() {
+            if (initialThreadRpid > 0L) {
+                // 直达模式：楼中楼首项；未落地时交给 reloadThread 完成后的 focusThread
+                val threadChild = binding.recyclerCommentThread.getChildAt(0)
+                if (threadChild != null) {
+                    threadChild.requestFocus()
+                }
+                return
+            }
             val child = binding.recyclerComments.getChildAt(0)
             when {
                 child != null -> child.requestFocus()
@@ -221,6 +246,8 @@ internal class CommentPanelDialog(
     private fun handleBackNavigation() {
         when {
             imageViewer.isViewing -> imageViewer.dismiss()
+            // 直达楼中楼：用户没经过根列表，BACK 直接关面板回来源页
+            isThreadVisible() && threadEnteredDirectly -> this@CommentPanelDialog.cancel()
             isThreadVisible() -> {
                 showRoot()
                 focusRoot(threadState.consumeReturnFocusRpid())
@@ -247,12 +274,15 @@ internal class CommentPanelDialog(
         binding.buttonClose.visibility = View.GONE
         binding.topTitle.text = activity.getString(R.string.player_comment_title)
         threadState.clearRoot()
+        // 已回到根列表：后续进楼中楼都是普通路径，BACK 恢复回根列表
+        threadEnteredDirectly = false
         commentsAdapter.invalidateSizing()
     }
 
-    private fun openThread(rootRpid: Long) {
+    private fun openThread(rootRpid: Long, direct: Boolean = false) {
         val safeRoot = rootRpid.takeIf { it > 0L } ?: return
         threadState.open(safeRoot)
+        threadEnteredDirectly = direct
         binding.recyclerComments.visibility = View.GONE
         binding.recyclerCommentThread.visibility = View.VISIBLE
         binding.sortRow.visibility = View.GONE
@@ -355,6 +385,24 @@ internal class CommentPanelDialog(
         openItemPictures(item, startIndex = 0)
     }
 
+    /**
+     * 菜单键打开评论用户主页：暂时下线（用户反馈先屏蔽），按菜单键不响应、原样分发。
+     * 恢复时把下面的菜单键分支加回 [dispatchKeyEvent] 即可，取焦点条目的逻辑
+     * 保留在 [focusedCommentItem]。
+     */
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        return super.dispatchKeyEvent(event)
+    }
+
+    private fun focusedCommentItem(): VideoCommentItem? {
+        val recycler = if (isThreadVisible()) binding.recyclerCommentThread else binding.recyclerComments
+        val focused = recycler.findFocus() ?: return null
+        val position = recycler.getChildAdapterPosition(focused)
+        if (position == RecyclerView.NO_POSITION) return null
+        val adapter = recycler.adapter as? VideoCommentsAdapter ?: return null
+        return adapter.itemAt(position)
+    }
+
     private fun openItemPictures(item: VideoCommentItem, startIndex: Int) {
         if (item.pictures.isNotEmpty()) {
             imageViewer.open(pictures = item.pictures, startIndex = startIndex)
@@ -426,7 +474,10 @@ internal class CommentPanelDialog(
                     if (token != commentsFetchToken) return@launch
 
                     commentsState.replace(pageData)
-                    updateTitle(pageData.totalCount.coerceAtLeast(0).toLong())
+                    // 直达模式下根列表在后台加载，加载完不能覆盖楼中楼的「评论详情」标题
+                    if (!isThreadVisible()) {
+                        updateTitle(pageData.totalCount.coerceAtLeast(0).toLong())
+                    }
 
                     commentsAdapter.setItems(commentsState.items)
                     if (commentsState.items.isEmpty()) {

@@ -9,6 +9,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
 import android.widget.TextView
 
 import com.myblbl.core.ui.base.ChoiceDialog
@@ -31,6 +32,8 @@ import com.myblbl.model.search.SearchVideoOrder
 import com.myblbl.ui.activity.LivePlayerActivity
 import com.myblbl.core.common.content.ContentFilter
 import com.myblbl.core.ui.base.BaseFragment
+import com.myblbl.core.ui.base.OnBackPressedHandler
+import com.myblbl.ui.activity.MainActivity
 import com.myblbl.ui.fragment.main.MainTabFocusTarget
 import com.myblbl.feature.detail.UserSpaceFragment
 import com.myblbl.feature.series.SeriesDetailFragment
@@ -56,7 +59,8 @@ import com.myblbl.core.ui.base.AppToast
 class SearchNewFragment :
     BaseFragment<FragmentSearchNewBinding>(),
     MainTabFocusTarget,
-    KeyboardView.KeySelectListener {
+    KeyboardView.KeySelectListener,
+    OnBackPressedHandler {
 
     private val viewModel: SearchViewModel by viewModel()
     private lateinit var hotSearchAdapter: HotSearchAdapter
@@ -139,6 +143,7 @@ class SearchNewFragment :
     override fun initData() {
         loadRecentSearches()
         viewModel.loadHotSearch()
+        viewModel.loadSearchDefault()
         pendingOpenKeyword = arguments?.getString(ARG_KEYWORD)?.trim()?.takeIf { it.isNotEmpty() }
         submitPendingOpenKeyword()
     }
@@ -157,6 +162,16 @@ class SearchNewFragment :
                 viewModel.suggestWords.collectLatest { suggests ->
                     latestSuggests = suggests
                     syncCenterColumn()
+                }
+            }
+        }
+
+        viewLifecycleOwner.lifecycleScope.launch {
+            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
+                viewModel.searchDefault.collectLatest { word ->
+                    // 输入框为空时把官方默认词亮成占位提示，拉动搜索也回退到它
+                    binding.editText.hint = word?.showName?.takeIf { it.isNotBlank() }
+                        ?: getString(R.string.search)
                 }
             }
         }
@@ -195,13 +210,29 @@ class SearchNewFragment :
     }
 
     private fun setupInput() {
+        // 焦点即呼出系统输入法：真机盒子无 IME 时 showSoftInput 静默失败，行为退回自家屏上键盘，无损
         binding.editText.showSoftInputOnFocus = false
+        binding.editText.setOnFocusChangeListener { _, hasFocus ->
+            if (hasFocus) {
+                showSystemInputMethod()
+            } else {
+                // 系统键盘是浮层，焦点移去自家键盘/列表时不收会一直盖在下半屏
+                hideSystemInputMethod()
+            }
+        }
+        binding.editText.setOnClickListener { showSystemInputMethod() }
+        // 触屏点输入框以外收输入法由 MainActivity.dispatchTouchEvent 统一处理
+        // （OnTouchListener 只能收到落到空白的触摸，点 RecyclerView 条目/按钮收不到）
 
         binding.editText.setOnKeyListener { view, keyCode, event ->
             if (event.action != KeyEvent.ACTION_DOWN) {
                 return@setOnKeyListener false
             }
             when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
+                    showSystemInputMethod()
+                    true
+                }
                 KeyEvent.KEYCODE_DPAD_LEFT -> mainActivity?.focusLeftFunctionArea(view) == true
                 KeyEvent.KEYCODE_DPAD_DOWN -> {
                     if (isResultPanelVisible) {
@@ -215,9 +246,15 @@ class SearchNewFragment :
                 KeyEvent.KEYCODE_DPAD_RIGHT -> {
                     if (isResultPanelVisible) {
                         focusResultHeader(view)
-                    } else {
+                    } else if (!binding.editText.text?.toString().isNullOrBlank()) {
+                        // 输入中：按右进联想词列表
                         focusCenterColumn(view) ||
                             focusHotColumn(view) ||
+                            binding.viewKeyboard.requestPrimaryFocus()
+                    } else {
+                        // 空输入：按右直达第一条热搜（v2.1.14 反馈），中列为历史记录不抢右键
+                        focusHotColumn(view) ||
+                            focusCenterColumn(view) ||
                             binding.viewKeyboard.requestPrimaryFocus()
                     }
                 }
@@ -258,6 +295,28 @@ class SearchNewFragment :
     private fun setupKeyboard() {
         binding.viewKeyboard.setKeySelectListener(this)
         binding.viewKeyboard.setDispatchKeyDel(true)
+        // 按键懒构建，不在这里建的话首次进入键盘区域是空白，要等焦点移进去才画出来
+        binding.viewKeyboard.ensureBuilt()
+    }
+
+    private fun showSystemInputMethod() {
+        val editText = binding.editText
+        editText.requestFocus()
+        // 点击当帧焦点可能还没落到输入框，showSoftInput 会直接失败，等一帧再呼
+        editText.post {
+            if (!editText.isAttachedToWindow) return@post
+            val inputMethodManager = editText.context
+                .getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+            // flags=0 显式请求：SHOW_IMPLICIT 允许系统在用户曾手动收起等场景静默忽略
+            val accepted = inputMethodManager?.showSoftInput(editText, 0) ?: false
+            AppLog.d(TAG, "showSystemInputMethod: focused=${editText.isFocused} accepted=$accepted")
+        }
+    }
+
+    private fun hideSystemInputMethod() {
+        val inputMethodManager = binding.editText.context
+            .getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+        inputMethodManager?.hideSoftInputFromWindow(binding.editText.windowToken, 0)
     }
 
     private fun setupKeywordColumns() {
@@ -307,13 +366,33 @@ class SearchNewFragment :
         binding.tabSearchResult.enableTouchNavigation(
             binding.viewPagerResult,
             tabFocusable = true,
-            onNavigateDown = { focusCurrentResultContent() }
+            onNavigateDown = { focusCurrentResultContent() },
+            // tab 上方是结果搜索框；不传会走框架默认，焦点越层逃去主页侧栏
+            onNavigateUp = { focusResultHeader() },
+            // 首个 tab 左键：tab 栏已被扩展恒消费（不传回调=焦点原地不动），显式指到主边栏
+            onNavigateLeft = ::focusSidebarCurrentTabFromTab
         )
         PagePerfLogger.mark("Search", "result_setup_end", setupStartMs)
         return adapter
     }
 
     private fun setupResultHeader() {
+        binding.layoutResultSearchBox.setOnClickListener { enterEditFromResult() }
+        binding.layoutResultSearchBox.setOnKeyListener { view, keyCode, event ->
+            if (event.action != KeyEvent.ACTION_DOWN) {
+                return@setOnKeyListener false
+            }
+            when (keyCode) {
+                KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
+                    enterEditFromResult()
+                    true
+                }
+                // 不交给框架默认导航：FocusFinder 在 ViewPager+列表布局会跳过 tab 直奔列表深处
+                KeyEvent.KEYCODE_DPAD_DOWN ->
+                    focusSelectedResultTab() || focusCurrentResultContent(view)
+                else -> false
+            }
+        }
         binding.buttonResultBack.apply {
             val goBack = {
                 if (arguments?.containsKey(ARG_KEYWORD) == true) {
@@ -351,7 +430,9 @@ class SearchNewFragment :
             }
             when (keyCode) {
                 KeyEvent.KEYCODE_DPAD_DOWN -> focusCurrentResultContent(view)
-                KeyEvent.KEYCODE_DPAD_LEFT -> binding.tabSearchResult.focusNearestTabTo(view)
+                KeyEvent.KEYCODE_DPAD_LEFT ->
+                    binding.layoutResultSearchBox.requestFocus() ||
+                        binding.tabSearchResult.focusNearestTabTo(view)
                 else -> false
             }
         }
@@ -369,7 +450,18 @@ class SearchNewFragment :
             currentOrder = orders[which]
             updateOrderText()
             if (currentKeyword.isNotBlank()) {
-                performSearch(currentKeyword)
+                if (currentOrder == SearchVideoOrder.TotalRank) {
+                    performSearch(currentKeyword)
+                } else {
+                    // 综合搜索接口不支持 order，只按新排序重拉视频 tab；其余 tab 与排序无关保持不动
+                    viewModel.loadSearchPage(
+                        SearchType.Video,
+                        currentKeyword,
+                        pageSize,
+                        currentOrder,
+                        forceRefresh = true
+                    )
+                }
             }
         }
         activity?.let { ViewUtils.hideSystemBars(it) }
@@ -392,10 +484,14 @@ class SearchNewFragment :
     }
 
     private fun performSearch(keyword: String) {
-        val normalized = keyword.trim()
+        var normalized = keyword.trim()
         if (normalized.isEmpty()) {
-            AppToast.show(requireContext(), R.string.empty_keyword)
-            return
+            // 空输入直接搜索时回退到官方默认词（与输入框占位一致），仍无词才提示
+            normalized = viewModel.searchDefault.value?.name?.trim().orEmpty()
+            if (normalized.isEmpty()) {
+                AppToast.show(requireContext(), R.string.empty_keyword)
+                return
+            }
         }
 
         currentKeyword = normalized
@@ -420,7 +516,7 @@ class SearchNewFragment :
         }
 
         pendingHistoryKeyword = normalized
-        viewModel.searchAll(normalized)
+        viewModel.searchAll(normalized, currentOrder)
     }
 
     private fun onResultItemClick(entry: SearchResultEntry) {
@@ -499,6 +595,14 @@ class SearchNewFragment :
         }, SEARCH_PANEL_FOCUS_DELAY_MS)
     }
 
+    // 结果面板顶部搜索框选中（点击/OK）：收面板回编辑态，原词已带在输入框，焦点即弹系统输入法
+    private fun enterEditFromResult() {
+        showSearchPanel()
+        if (binding.editText.requestFocus()) {
+            binding.editText.setSelection(binding.editText.text?.length ?: 0)
+        }
+    }
+
     private fun syncCenterColumn() {
         if (isResultPanelVisible) {
             return
@@ -561,15 +665,31 @@ class SearchNewFragment :
         }
     }
 
-    fun onBackPressed(): Boolean {
-        if (isResultPanelVisible) {
-            if (arguments?.containsKey(ARG_KEYWORD) == true) {
-                return false
+    /**
+     * BACK 分层（对齐主页 内容→二级tab→侧栏）：
+     * 结果面板内容区 → 先聚焦顶部结果分类 tab；已在分类 tab 上 → 退回搜索面板；
+     * 搜索面板内（热搜/历史/键盘）→ 先回搜索输入框；已在输入框 → 回主边栏当前 tab；
+     * 焦点已在本页外 → false 交双击退出。
+     * 原方法无任何调用方（死代码），2.1.13 后接入 OnBackPressedHandler 生效。
+     */
+    override fun onBackPressed(): Boolean {
+        if (view == null) {
+            return false
+        }
+        if (!binding.root.hasFocus()) {
+            return false
+        }
+        if (isResultPanelVisible && arguments?.containsKey(ARG_KEYWORD) != true) {
+            if (!binding.tabSearchResult.hasFocus() && focusSelectedResultTab()) {
+                return true
             }
             showSearchPanel()
             return true
         }
-        return false
+        if (!binding.editText.hasFocus() && binding.editText.requestFocus()) {
+            return true
+        }
+        return (activity as? MainActivity)?.focusSidebarCurrentTab() == true
     }
 
     private fun loadRecentSearches() {
@@ -665,7 +785,11 @@ class SearchNewFragment :
         binding.tabSearchResult.enableTouchNavigation(
             binding.viewPagerResult,
             tabFocusable = true,
-            onNavigateDown = { focusCurrentResultContent() }
+            onNavigateDown = { focusCurrentResultContent() },
+            // tab 上方是结果搜索框；不传会走框架默认，焦点越层逃去主页侧栏
+            onNavigateUp = { focusResultHeader() },
+            // 首个 tab 左键：tab 栏已被扩展恒消费（不传回调=焦点原地不动），显式指到主边栏
+            onNavigateLeft = ::focusSidebarCurrentTabFromTab
         )
         viewModel.searchPageStates.value.forEach { (type, state) ->
             adapter.submitState(type, state.items, state.loading, state.hasMore)
@@ -747,6 +871,11 @@ class SearchNewFragment :
     }
 
     private fun restoreSearchPanelFocus(anchorView: View? = null): Boolean {
+        // 进入搜索面板（侧栏按右 / 结果面板返回）统一先落搜索输入框；
+        // 原实现恢复"上次聚焦的热搜条目"，再次进入仍停在第三条热搜（v2.1.14 反馈）
+        if (binding.editText.isVisible && binding.editText.requestFocus()) {
+            return true
+        }
         return focusCoordinator.restoreSearchPanelFocus(
             anchorView = anchorView,
             focusCenterColumn = ::focusCenterColumn,
@@ -797,12 +926,20 @@ class SearchNewFragment :
         )
     }
 
+    /** 首个 tab 上按 LEFT：回到主边栏当前激活按钮（搜索页=搜索按钮，与卡片左边缘兜底一致）。 */
+    private fun focusSidebarCurrentTabFromTab(): Boolean {
+        return mainActivity?.focusSidebarCurrentTab() == true
+    }
+
     private fun focusResultHeader(
         anchorView: View? = view?.findFocus(),
         includeOrderButton: Boolean = true
     ): Boolean {
         val candidates = buildList {
             binding.buttonResultBack.takeIf { it.isVisible && it.isFocusable }?.let {
+                add(it)
+            }
+            binding.layoutResultSearchBox.takeIf { it.isVisible && it.isFocusable }?.let {
                 add(it)
             }
             addAll(resultTabViews())
@@ -824,6 +961,9 @@ class SearchNewFragment :
 
     private fun focusResultPrimaryActions(anchorView: View? = view?.findFocus()): Boolean {
         val candidates = buildList {
+            binding.layoutResultSearchBox.takeIf { it.isVisible && it.isFocusable }?.let {
+                add(it)
+            }
             addAll(resultTabViews())
             if (binding.buttonOrder.isVisible && binding.buttonOrder.isFocusable) {
                 add(binding.buttonOrder)

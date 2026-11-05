@@ -4,9 +4,10 @@
 
 1. **提交代码必须由用户发起**：未经用户明确要求，不得执行 `git commit`、`git push` 等提交/推送操作。只读操作（status、diff、log）不受此限制。
 2. **联网工具需经允许**：未经用户明确同意，不得调用联网搜索、网页抓取等 MCP 工具（如 WebSearch、webReader）。应优先通过阅读本地代码、反编译资料、项目内已有文档得出结论。
-3. **定位问题**：不能瞎猜，如果无法定位，首选打入详细的日志进行定位。
-4. **提交就在当前分支**：用户要求提交代码时，默认在当前所在分支提交。除非用户明确要求新建分支，否则不要擅自 `git checkout -b` 新建分支。
-5. **终端统一使用 Git Bash**：执行终端命令时使用 Git Bash，不使用 `cmd` 或 PowerShell。
+3. **模拟器操作需经允许**：未经用户明确同意，不得在当前对话中操作模拟器（如 adb 安装/启动应用、模拟按键触摸、截屏、uiautomator dump 等）。
+4. **定位问题**：不能瞎猜，如果无法定位，首选打入详细的日志进行定位。
+5. **提交就在当前分支**：用户要求提交代码时，默认在当前所在分支提交。除非用户明确要求新建分支，否则不要擅自 `git checkout -b` 新建分支。
+6. **终端统一使用 Git Bash**：执行终端命令时使用 Git Bash，不使用 `cmd` 或 PowerShell。
 
 ## 寻找 BUG 时的自我打分约束
 
@@ -41,7 +42,14 @@
    - 筛选重大变更，按模块分类归纳
    - 用简洁的用户可读语言（非 commit message 原文）撰写更新说明
    - 将新版本内容追加到 `CHANGELOG.md` 顶部
-3. **提交**：将 `build.gradle.kts` 和 `CHANGELOG.md` 一起提交，commit message 格式：`v{版本号}`
+3. **更新 `version.json`**（app 内更新检查的元数据，改仓库根目录的 `version.json`）：
+   ```json
+   { "version": "x.y.z", "apk": "MyBLBL-vx.y.z-release.apk", "notes": "本版更新说明（可 \\n 换行）" }
+   ```
+   - `version` 不带 v 前缀，与 `versionName` 一致；`apk` 文件名必须与实际发版上传的 release APK 完全一致；`notes` 取本版 CHANGELOG 内容
+   - 发 GitHub Release 时，将 release APK 与这份 `version.json` **一并作为附件上传**（app 端检查链路：release 附件 → 仓库 main 的 version.json → api.github.com 三级容错，附件漏传时靠仓库文件兜住但 release 正文/附件仍是权威展示，v2.1.20 曾因漏传此附件导致全员「检查失败」）
+4. **提交**：将 `build.gradle.kts`、`CHANGELOG.md` 和 `version.json` 一起提交，commit message 格式：`v{版本号}`
+5. **发版后验证（强制）**：GitHub Release 网页发布完成后，**当次**运行 `bash scripts/verify_release_assets.sh`（直连不通时加代理参数，如 `bash scripts/verify_release_assets.sh http://127.0.0.1:7897`），脚本走 App 同款下载链路验证 latest release 的 version.json 可拉取且版本号与本地一致。报红=漏传或 Release 未生效，补传后重跑至 PASS 才算发版完成。网页上传附件靠人脑记清单并不可靠（v2.1.20 教训），此步是唯一的机器校验，不得跳过。
 
 ### CHANGELOG 格式规范
 

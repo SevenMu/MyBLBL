@@ -35,47 +35,50 @@ class MyPlayerControlViewLayoutManager(
     private val extraControlsScrollView: ViewGroup = playerControlView.findViewById(R.id.exo_extra_controls_scroll_view)
     private val overflowShowButton: View = playerControlView.findViewById(R.id.exo_overflow_show)
     private val overflowHideButton: View = playerControlView.findViewById(R.id.exo_overflow_hide)
+    // 排列顺序按使用频率（用户 2.1.13 反馈，2.1.14 评论提到播放旁）：上一个/暂停/评论/下一个/
+    // 点赞/弹幕/字幕/倍速/选集/UP主/推荐/循环/总设置，其余低频按钮（刷新/快退快进/SC开关/镜像/直播设置/关闭）排尾
     private val orderedButtons: List<View> = listOf(
+        playerControlView.findViewById(R.id.button_previous),
         playerControlView.findViewById(R.id.button_play),
         playerControlView.findViewById(R.id.button_comment),
-        playerControlView.findViewById(R.id.button_more),
-        playerControlView.findViewById(R.id.button_refresh),
-        playerControlView.findViewById(R.id.button_previous),
         playerControlView.findViewById(R.id.button_next),
-        playerControlView.findViewById(R.id.button_rewind),
-        playerControlView.findViewById(R.id.button_fast_forward),
+        playerControlView.findViewById(R.id.button_more),
         playerControlView.findViewById(R.id.button_dm_switch),
-        playerControlView.findViewById(R.id.button_sc_switch),
-        playerControlView.findViewById(R.id.button_mirror),
+        playerControlView.findViewById(R.id.button_subtitle),
         playerControlView.findViewById(R.id.button_play_speed),
-        playerControlView.findViewById(R.id.exo_settings),
         playerControlView.findViewById(R.id.button_choose_episode),
         playerControlView.findViewById(R.id.button_up_info),
-        playerControlView.findViewById(R.id.button_subtitle),
         playerControlView.findViewById(R.id.button_related),
         playerControlView.findViewById(R.id.button_repeat),
+        playerControlView.findViewById(R.id.exo_settings),
+        playerControlView.findViewById(R.id.button_refresh),
+        playerControlView.findViewById(R.id.button_rewind),
+        playerControlView.findViewById(R.id.button_fast_forward),
+        playerControlView.findViewById(R.id.button_sc_switch),
+        playerControlView.findViewById(R.id.button_mirror),
         playerControlView.findViewById(R.id.button_live_settings),
         playerControlView.findViewById(R.id.button_close)
     )
+    // 屏宽不足时先进 overflow 的顺序：非高频列表的按钮最先收起，然后按高频列表从尾往头收
     private val overflowPriority = listOf(
         R.id.button_live_settings,
-        R.id.button_repeat,
-        R.id.button_related,
-        R.id.button_subtitle,
-        R.id.button_up_info,
-        R.id.button_comment,
-        R.id.button_more,
-        R.id.button_choose_episode,
-        R.id.button_refresh,
-        R.id.button_sc_switch,
-        R.id.button_dm_switch,
         R.id.button_mirror,
-        R.id.button_play_speed,
-        R.id.button_next,
-        R.id.button_previous,
+        R.id.button_sc_switch,
         R.id.button_fast_forward,
         R.id.button_rewind,
-        R.id.exo_settings
+        R.id.button_refresh,
+        R.id.exo_settings,
+        R.id.button_repeat,
+        R.id.button_related,
+        R.id.button_up_info,
+        R.id.button_choose_episode,
+        R.id.button_play_speed,
+        R.id.button_subtitle,
+        R.id.button_dm_switch,
+        R.id.button_more,
+        R.id.button_next,
+        R.id.button_comment,
+        R.id.button_previous
     )
     private val hiddenTranslationY by lazy {
         playerControlView.resources.getDimension(R.dimen.px147)
@@ -103,6 +106,24 @@ class MyPlayerControlViewLayoutManager(
     private var progressOnlyUiEnabled: Boolean = true
     private var timeViewVisible: Boolean = true
     private var adaptiveLayoutScheduled: Boolean = false
+    private var hideCallbacksSuspended: Boolean = false
+
+    /**
+     * 弹窗类面板（选集/合集/章节等）打开期间挂起控制栏自动隐藏调度。
+     * 挂起时 [resetHideCallbacks] 只清不挂（show 动画结束回调的重挂也被拦截）；
+     * 解除挂起会立即按当前可见状态恢复一次正常调度。
+     */
+    fun setHideCallbacksSuspended(suspended: Boolean) {
+        if (hideCallbacksSuspended == suspended) {
+            return
+        }
+        hideCallbacksSuspended = suspended
+        if (suspended) {
+            removeHideCallbacks()
+        } else {
+            resetHideCallbacks()
+        }
+    }
 
     init {
         overflowShowButton.setOnClickListener { showOverflowControls() }
@@ -155,6 +176,9 @@ class MyPlayerControlViewLayoutManager(
 
     fun isFullyVisible(): Boolean = uxState == UX_STATE_ALL_VISIBLE && playerControlView.isVisible()
 
+    /** 是否处于「仅进度条」态（长按快进的瞬时进度条模式）。 */
+    fun isProgressOnlyVisible(): Boolean = uxState == UX_STATE_ONLY_PROGRESS_VISIBLE
+
     fun setAnimationEnabled(enabled: Boolean) {
         isAnimationEnabled = enabled
     }
@@ -193,6 +217,13 @@ class MyPlayerControlViewLayoutManager(
 
     fun resetHideCallbacks() {
         if (uxState == UX_STATE_ANIMATING_HIDE) {
+            return
+        }
+        if (hideCallbacksSuspended) {
+            // 弹窗类面板打开期间挂起自动隐藏：show 动画结束回调会重新武装
+            // hide 调度（晚于面板入口的 remove），不挂起的话面板开着约 3 秒后
+            // 控制栏会自动缩回（v2.1.14「打开合集面板控制栏缩回」根因）
+            removeHideCallbacks()
             return
         }
         removeHideCallbacks()

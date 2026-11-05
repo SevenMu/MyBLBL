@@ -8,6 +8,7 @@ import com.myblbl.ui.activity.LivePlayerActivity
 import com.myblbl.ui.activity.MainActivity
 import com.myblbl.ui.activity.PlayerActivity
 import com.myblbl.feature.detail.VideoDetailFragment
+import com.myblbl.feature.series.SeriesDetailFragment
 import com.myblbl.feature.player.PlaybackStartupTrace
 import com.myblbl.feature.player.settings.PlayerSettingsStore
 import com.myblbl.core.common.ext.isOpenDetailFirstEnabled
@@ -49,6 +50,20 @@ object VideoRouteNavigator {
             val hostActivity = findMainActivityHost(context)
             AppLog.d(TAG, "openVideo: detailFirst=true, host=$hostActivity")
             if (hostActivity != null) {
+                // PGC（番剧/影视）条目必须走番剧详情页：UGC 详情页用 x/web-interface
+                // 接口加载，番剧单集返回的数据没有 ugcSeason，选集/预告/花絮整个
+                // 不显示（v2.1.14 反馈：历史页点进看过的番剧下方空白）。历史条目的
+                // seasonId 由 uri(/bangumi/play/ssXXXX) 解析、epId=history.epid。
+                if (video.isPgc && video.playbackSeasonId > 0L) {
+                    AppLog.d(TAG, "openVideo: pgc route seasonId=${video.playbackSeasonId} epId=${video.playbackEpId}")
+                    hostActivity.openInHostContainer(
+                        SeriesDetailFragment.newInstance(
+                            seasonId = video.playbackSeasonId,
+                            epId = video.playbackEpId
+                        )
+                    )
+                    return
+                }
                 hostActivity.openInHostContainer(VideoDetailFragment.newInstance(video, playQueue))
                 return
             }
@@ -82,7 +97,10 @@ object VideoRouteNavigator {
             hostActivity.openInHostContainer(VideoDetailFragment.newInstance(video, playQueue))
             return true
         }
-        return false
+        // 播放器等独立 Activity 宿主拿不到主页容器：带参拉起主页直达详情
+        // （CLEAR_TOP 复用栈底主页并替换其上的播放器）。此入口语义是「看详情」，
+        // 失败也不能兜底成播放。
+        return MainActivity.startWithVideoDetail(context, video)
     }
 
     fun openHistory(

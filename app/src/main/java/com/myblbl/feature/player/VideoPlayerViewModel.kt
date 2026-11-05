@@ -22,6 +22,7 @@ import androidx.media3.exoplayer.source.MediaSource
 import com.google.gson.Gson
 import com.myblbl.core.common.media.VideoCodecSupport
 
+import com.myblbl.model.episode.EpisodeListMerge
 import com.myblbl.model.dm.DmMaskRepository
 import com.myblbl.model.dm.DmModel
 import com.myblbl.model.interaction.InteractionModel
@@ -71,6 +72,7 @@ import kotlin.time.Duration.Companion.milliseconds
 import com.myblbl.feature.player.progress.PlaybackProgressStore
 import com.myblbl.feature.player.progress.PlaybackResumePositionPolicy
 import com.myblbl.feature.player.sponsor.AvToBv
+import com.myblbl.feature.player.sponsor.OfficialClipSegments
 import com.myblbl.feature.player.sponsor.SponsorBlockUseCase
 import com.myblbl.feature.player.sponsor.SponsorCategoryPrefs
 import com.myblbl.feature.player.sponsor.SponsorSegment
@@ -452,6 +454,13 @@ class VideoPlayerViewModel(
 
     private val sponsorBlockUseCase = SponsorBlockUseCase()
 
+    // 官方片头片尾（pgc playurl clip_info_list）：与空降助手相互独立、可并存。
+    // pending 为 playinfo 就绪时的暂存，首帧后按 cid 装载，预载下一集不会冲掉当前集。
+    private val officialClipUseCase = SponsorBlockUseCase()
+    private var officialClipsCid: Long = 0L
+    private var pendingOfficialClips: List<SponsorSegment> = emptyList()
+    private var pendingOfficialClipsCid: Long = 0L
+
     sealed interface SponsorSkipUiState {
         data object Hidden : SponsorSkipUiState
         data class ShowButton(val segment: SponsorSegment) : SponsorSkipUiState
@@ -471,6 +480,45 @@ class VideoPlayerViewModel(
 
     private val _sponsorSegments = MutableStateFlow<List<SponsorSegment>>(emptyList())
     val sponsorSegments: StateFlow<List<SponsorSegment>> = _sponsorSegments
+
+    /** 进度条跳过标记统一发布：空降片段 + 官方片头片尾。 */
+    private fun publishSkipSegments() {
+        _sponsorSegments.value = sponsorBlockUseCase.getSegments() + officialClipUseCase.getSegments()
+    }
+
+    /** 官方片头片尾：playinfo 就绪时暂存（开关关闭即清空），真正装载见 [applyPendingOfficialClips]。 */
+    private fun applyOfficialClips(cid: Long, playInfo: PlayInfoModel) {
+        if (!currentSettings.skipOfficialOpEd) {
+            pendingOfficialClips = emptyList()
+            pendingOfficialClipsCid = 0L
+            return
+        }
+        val segments = OfficialClipSegments.toSegments(playInfo.clipInfoList)
+        pendingOfficialClips = segments
+        pendingOfficialClipsCid = if (segments.isEmpty()) 0L else cid
+        if (segments.isNotEmpty()) {
+            AppLog.i(
+                TAG,
+                "official_clips prepared cid=$cid count=${segments.size} " +
+                    "range=${segments.joinToString { "${it.startTimeMs}-${it.endTimeMs}ms ${it.category}" }}"
+            )
+        }
+    }
+
+    /** 首帧后装载官方片头片尾片段；cid 不匹配（预载的下一集）保持不动。 */
+    private fun applyPendingOfficialClips(cid: Long) {
+        if (pendingOfficialClipsCid <= 0L || pendingOfficialClipsCid != cid) return
+        officialClipUseCase.loadSegments(pendingOfficialClips)
+        officialClipsCid = cid
+        publishSkipSegments()
+    }
+
+    private fun resetOfficialClips() {
+        officialClipUseCase.reset()
+        officialClipsCid = 0L
+        pendingOfficialClips = emptyList()
+        pendingOfficialClipsCid = 0L
+    }
 
     private val _viewPoints = MutableStateFlow<List<ViewPoint>>(emptyList())
     val viewPoints: StateFlow<List<ViewPoint>> = _viewPoints
@@ -1033,6 +1081,7 @@ class VideoPlayerViewModel(
             requestedQualityId = preferredQualityId.takeIf { it > 0 } ?: currentSettings.defaultVideoQualityId
             requestedAudioId = preferredAudioQualityId.takeIf { it > 0 } ?: currentSettings.defaultAudioQualityId
             requestedCodec = currentSettings.defaultVideoCodec
+            AppLog.i(TAG, "playback prefs: quality=$requestedQualityId audio=$requestedAudioId codec=$requestedCodec")
             selectedQualityId = null
             selectedAudioId = null
             selectedCodec = null
@@ -1050,6 +1099,7 @@ class VideoPlayerViewModel(
             danmakuController.clear()
             sponsorLoadJob?.cancel()
             sponsorBlockUseCase.reset()
+            resetOfficialClips()
             _sponsorSkipState.value = SponsorSkipUiState.Hidden
             _sponsorSegments.value = emptyList()
             _viewPoints.value = emptyList()
@@ -1183,6 +1233,7 @@ class VideoPlayerViewModel(
         // 旧集片段残留还会按新集时间轴误触发跳过。generation 未递增仍为当前有效值。
         sponsorLoadJob?.cancel()
         sponsorBlockUseCase.reset()
+        resetOfficialClips()
         _sponsorSkipState.value = SponsorSkipUiState.Hidden
         _sponsorSegments.value = emptyList()
         _viewPoints.value = emptyList()
@@ -1241,6 +1292,7 @@ class VideoPlayerViewModel(
         // 切剧情节点换 cid：旧节点空降片段按新节点时间轴会误触发跳过，须重置后按新 cid 重新准备。
         sponsorLoadJob?.cancel()
         sponsorBlockUseCase.reset()
+        resetOfficialClips()
         _sponsorSkipState.value = SponsorSkipUiState.Hidden
         _sponsorSegments.value = emptyList()
         _viewPoints.value = emptyList()
@@ -1289,10 +1341,19 @@ class VideoPlayerViewModel(
      * 避免选了杜比视界/HDR 后静默降级或播放失败被误认为「激活不了」。不阻断切换。
      */
     private fun warnHdrUnsupportedIfNecessary(qualityId: Int) {
-        val unsupportedNameRes = when (qualityId) {
-            126 -> if (VideoCodecSupport.isDolbyVisionSupported(appContext)) 0 else R.string.setting_quality_dolby_vision
-            125, 129 -> if (VideoCodecSupport.isHdrSupported(appContext)) 0 else R.string.quality_hdr
+        val isDolbyVisionTrack = VideoCodecSupport.isDolbyVisionTrack(qualityId, mimeType = null, codecs = null)
+        val unsupportedNameRes = when {
+            isDolbyVisionTrack -> if (VideoCodecSupport.isDolbyVisionSupported(appContext)) 0 else R.string.setting_quality_dolby_vision
+            qualityId == 125 || qualityId == 129 -> if (VideoCodecSupport.isHdrSupported(appContext)) 0 else R.string.quality_hdr
             else -> 0
+        }
+        if (isDolbyVisionTrack) {
+            // DV 档选择必打一条识别日志：真机排查「电视不进杜比视界模式」时据此
+            // 区分「设备无 DV 解码器（含厂商别名）」与「解码器在但管线未点亮」。
+            AppLog.i(
+                TAG,
+                "dolby vision track selected: qn=$qualityId deviceSupported=${VideoCodecSupport.isDolbyVisionSupported(appContext)}"
+            )
         }
         if (unsupportedNameRes != 0) {
             val name = appContext.getString(unsupportedNameRes)
@@ -1329,6 +1390,19 @@ class VideoPlayerViewModel(
         playWhenReady: Boolean
     ) {
         AppLog.i(TAG, "selectAudioQuality: id=${quality.id} name=${quality.name} bandwidth=${quality.bandwidth} codecId=${quality.codecId}")
+        // 无声预检：本机无 AC-3 解码器时切杜比全景声只会静默无声（media3 跳轨不报错），
+        // 提前拦截并保持当前有声轨，避免用户误以为播放故障。
+        if (quality.id == AudioQuality.AUDIO_DOLBY.id && !VideoCodecSupport.isDolbyAtmosTrackPlayable()) {
+            AppLog.w(TAG, "dolby atmos audio blocked: no ac3/eac3 decoder on device, keep current track")
+            AppToast.show(
+                appContext,
+                appContext.getString(
+                    R.string.player_audio_track_silent_hint,
+                    quality.displayName(appContext)
+                )
+            )
+            return
+        }
         requestedAudioId = quality.id
         _selectedAudioQuality.value = quality
         savePlayerSnapshot()
@@ -1704,7 +1778,9 @@ class VideoPlayerViewModel(
             return
         }
         PlaybackProgressStore.savePosition(bvid, currentCid, positionMs, duration.value)
-        AppLog.i(TAG, "local_progress_saved bvid=$bvid cid=$currentCid pos=$positionMs dur=${duration.value}")
+        // 常规落盘打点已注释：跟随心跳 2s 一条（60s 30 条）且次次成功、无信息量；
+        // 上方 skip 分支（无身份/位置过小）是异常信号，保留。排查进度保存时恢复。
+        // AppLog.i(TAG, "local_progress_saved bvid=$bvid cid=$currentCid pos=$positionMs dur=${duration.value}")
     }
 
     private fun rebuildPlayback() {
@@ -1921,7 +1997,13 @@ class VideoPlayerViewModel(
             ?.takeIf { it > 0L && it != seasonId }
             ?.let { apiService.getVideoEpisodeSections(it).result }
         val mergedDetail = detail.copy(
-            episodes = sectionResult?.mainSection?.episodes.orEmpty(),
+            // 与详情页同一规则：连载中正片后面补「下一集预告」，
+            // 否则上次看到预告集时播放器选集里没有这集，进度对不上。
+            episodes = EpisodeListMerge.mergeOngoingNextPreview(
+                mainEpisodes = sectionResult?.mainSection?.episodes.orEmpty(),
+                seasonEpisodes = detail.episodes.orEmpty(),
+                isFinished = detail.publish?.isFinish == 1
+            ),
             section = sectionResult?.section.orEmpty()
         )
         val episodeItems = episodeCatalogBuilder.buildPgcEpisodes(mergedDetail)
@@ -2042,7 +2124,29 @@ class VideoPlayerViewModel(
             val playerHasSameSource = PlayerInstancePool.isAttachedSource(
                 replayBvid, initialIdentity.cid
             )
-            if (cachedPlayback != null && playerHasSameSource) {
+            // 编码偏好校验：zero-overhead 快照带着上次播放的实际编码（可能是档位回落的值），
+            // 若本次请求的编码偏好（设置默认/用户切换）重算后会得到不同编码（且该档确实有
+            // 偏好编码），说明快照已不符合当前意图——放弃复用走重建链让 resolveSelections
+            // 重新解析（设置页改了默认编码后重进同一视频必须生效，issue#101 实测缓存快照
+            // 把 HEVC 钉死、设置切 AV1 无效）。重算只是纯排序（buildCodecList），代价可忽略；
+            // 偏好编码在该档不可用时排序结果与缓存一致，照常复用不受回落场景影响。
+            val codecStillMatchesRequest = cachedPlayback?.let { cached ->
+                streamResolver.buildCodecList(
+                    playInfo = cached.playInfo,
+                    qualityId = cached.selectionSnapshot.selectedQualityId,
+                    preferredCodec = requestedCodec ?: selectedCodec,
+                    hardwareSupportedCodecs = hardwareSupportedVideoCodecs
+                ).firstOrNull()?.also { resolved ->
+                    if (resolved != cached.selectionSnapshot.selectedCodec) {
+                        AppLog.w(
+                            TAG,
+                            "zero_overhead_reuse_codec_mismatch: cached=${cached.selectionSnapshot.selectedCodec} " +
+                                "requested=${requestedCodec ?: selectedCodec} resolves=$resolved — rebuild source"
+                        )
+                    }
+                } == cached.selectionSnapshot.selectedCodec
+            } ?: true
+            if (cachedPlayback != null && playerHasSameSource && codecStillMatchesRequest) {
                 // 诊断：对照"请求身份"与"VM 缓存命中内容"，防止跨视频串台。
                 val cachedUri = catchingRequest {
                     cachedPlayback.mediaSource.mediaItem.localConfiguration?.uri?.toString()
@@ -2458,12 +2562,20 @@ class VideoPlayerViewModel(
         val resumeStartMs = System.currentTimeMillis()
         val maxPages = 6
         val pageSize = 30
+        // 游标三元组：只带 view_at 定位不了同一秒的相邻条目，跨页会丢/重条目
         var viewAt = 0L
+        var cursorMax = 0L
+        var cursorBusiness = ""
         val matchedAid = aid?.takeIf { it > 0L }
         val matchedBvid = bvid
 
         for (page in 1..maxPages) {
-            val result = userRepository.getHistory(viewAt, pageSize).getOrNull()
+            val result = userRepository.getHistory(
+                viewAt = viewAt,
+                pageSize = pageSize,
+                max = cursorMax,
+                business = cursorBusiness
+            ).getOrNull()
             val history = result?.data ?: return null
             val list = history.list
             if (list.isEmpty()) break
@@ -2494,6 +2606,8 @@ class VideoPlayerViewModel(
             viewAt = history.cursor?.viewAt
                 ?: list.lastOrNull()?.viewAt
                 ?: 0L
+            cursorMax = history.cursor?.max ?: 0L
+            cursorBusiness = history.cursor?.business.orEmpty()
             if (viewAt <= 0L) break
         }
 
@@ -2664,6 +2778,8 @@ class VideoPlayerViewModel(
         identity.bvid
             ?.takeIf { it.isNotBlank() && identity.epId == null }
             ?.let { bvid -> VideoPlayerPlayInfoCache.put(bvid = bvid, cid = identity.cid, playInfo = initialPlayInfo, requestSession = requestSession) }
+
+        applyOfficialClips(identity.cid, initialPlayInfo)
 
         PlaybackStartupTrace.log(
             traceId = currentStartupTraceId,
@@ -2887,7 +3003,9 @@ class VideoPlayerViewModel(
         }
 
         if (resetFallbackAttempts) {
-            fallbackController.reset()
+            // 同视频重建只复位尝试计数，降档去重记忆留给切视频入口的 reset() 全清，
+            // 否则降档重建自己会抹掉「已试过降档」的记录，错误风暴永不收敛（issue#101 海信现场）。
+            fallbackController.resetAttemptState()
         }
         fallbackController.rememberCurrentFallbackAttempt(countAsFallback = countCurrentAttemptAsFallback)
 
@@ -3012,6 +3130,7 @@ class VideoPlayerViewModel(
             }
         }
         scheduleDeferredSponsorLoadAfterFirstFrame(cid)
+        applyPendingOfficialClips(cid)
         viewModelScope.launch {
             // 首帧后先把弹幕链路放出去，心跳/扩展信息延后一个很短的窗口，降低首显附近主线程抖动。
             delay(FIRST_FRAME_DEFERRED_WORK_DELAY_MS.milliseconds)
@@ -3086,7 +3205,7 @@ class VideoPlayerViewModel(
             sponsorBlockUseCase.lastError?.let { error ->
                 AppLog.w(TAG, "sponsor load skipped: $error")
             }
-            _sponsorSegments.value = sponsorBlockUseCase.getSegments()
+            publishSkipSegments()
             PlaybackStartupTrace.log(
                 traceId = currentStartupTraceId,
                 startElapsedMs = currentStartupTraceStartElapsedMs,
@@ -3542,6 +3661,9 @@ class VideoPlayerViewModel(
         selectedQualityId = snapshot.selectedQualityId
         selectedAudioId = snapshot.selectedAudioId
         selectedCodec = snapshot.selectedCodec
+        // 编码偏好同步到 DefaultTrackSelector：应用层锁的编码要真正落到渲染器选轨上
+        // （PR#104 遗留问题——此前 route plan 写 HEVC 实际却开 AV1 解码器）。
+        PlayerInstancePool.setPreferredVideoCodec(selectedCodec)
         val audio = snapshot.audios.firstOrNull { it.id == selectedAudioId }
         AppLog.i(TAG, "applySelection: qualityId=$selectedQualityId audioId=$selectedAudioId " +
             "audioName=${audio?.name} audioCodecId=${audio?.codecId} audioBandwidth=${audio?.bandwidth} codec=$selectedCodec")
@@ -3613,7 +3735,9 @@ class VideoPlayerViewModel(
 
     private fun checkSponsorBlock(positionMs: Long) {
         val settings = currentSettings
-        if (!settings.sponsorBlockEnabled) return
+        // 官方片头片尾与空降助手相互独立：任一在效即继续轮询
+        val officialActive = officialClipsCid > 0L && officialClipsCid == currentCid
+        if (!settings.sponsorBlockEnabled && !officialActive) return
         if (sponsorSkipPending) {
             if (positionMs >= pendingSeekPositionMs - 500L) {
                 sponsorSkipPending = false
@@ -3621,7 +3745,16 @@ class VideoPlayerViewModel(
             }
             return
         }
-        val result = sponsorBlockUseCase.checkPosition(positionMs, autoSkip = true)
+        val officialResult = if (officialActive) {
+            officialClipUseCase.checkPosition(positionMs, autoSkip = true)
+        } else {
+            null
+        }
+        val result = if (settings.sponsorBlockEnabled) {
+            officialResult ?: sponsorBlockUseCase.checkPosition(positionMs, autoSkip = true)
+        } else {
+            officialResult
+        }
         when {
             result == null -> {
                 val current = _sponsorSkipState.value
@@ -3661,6 +3794,15 @@ class VideoPlayerViewModel(
 
     fun sponsorUserSeek(positionMs: Long) {
         sponsorBlockUseCase.onUserSeek(positionMs)
+        if (officialClipsCid > 0L && officialClipsCid == currentCid) {
+            officialClipUseCase.onUserSeek(positionMs)
+            // 用户主动拖回官方片头/片尾段内 = 想看，本集内不再自动跳该段
+            val officialSegments = officialClipUseCase.getSegments()
+            val landedInOfficial = officialSegments.any { positionMs >= it.startTimeMs && positionMs < it.endTimeMs }
+            if (landedInOfficial) {
+                officialClipUseCase.dismissCurrent()
+            }
+        }
         _sponsorSkipState.value = SponsorSkipUiState.Hidden
     }
 }

@@ -193,7 +193,9 @@ class HomeLaneFragment : BaseListFragment<HomeLaneSection>(), HomeTabPage {
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 mainNavigationViewModel.events.collectLatest { event ->
-                    if (!isResumed || view == null) {
+                    // 同 VideoFeedFragment：宿主 HomeFragment 被 hide 时本页仍 RESUMED，
+                    // 后台期间收到菜单键等事件不许刷新（view.isShown 判真正可见）
+                    if (!isResumed || view?.isShown != true) {
                         return@collectLatest
                     }
                     when (event) {
@@ -230,7 +232,12 @@ class HomeLaneFragment : BaseListFragment<HomeLaneSection>(), HomeTabPage {
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 appEventHub.events.collectLatest { event ->
-                    if (event == AppEventHub.Event.UserSessionChanged && isResumed && !isLoading) {
+                    // 不检查 isResumed：登录事件必然先于登录页 pop 到达（dispatch 在 cookie
+                    // 保存链上，pop 要等 activateAfterLogin 完成后的 finally），此刻本页
+                    // 被登录页盖着 isResumed=false，检查会把刷新挡掉且事件无重放——
+                    // 登录后首页永远停在访客流。repeatOnLifecycle(STARTED) 活跃期 view
+                    // 必在，refresh() 只启动 viewModelScope 协程，后台执行安全。
+                    if (event == AppEventHub.Event.UserSessionChanged && !isLoading) {
                         refresh()
                     }
                 }

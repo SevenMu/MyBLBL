@@ -23,6 +23,12 @@ object AppLog {
     private const val LOGCAT_TAIL_LINES = 2000
     private const val LOGCAT_READ_TIMEOUT_MS = 2000L
 
+    // 快照导出目录与滚动上限；LEGACY 前缀是旧版导出文件，清理白名单与 LanLogServer 一致
+    private const val SNAPSHOT_DIR = "logs"
+    private const val SNAPSHOT_PREFIX = "MyBLBL_log_"
+    private const val LEGACY_SNAPSHOT_PREFIX = "myblbl_log_"
+    private const val SNAPSHOT_MAX_COUNT = 10
+
     // @Volatile：开关在主线程翻转，action/cache 等后台线程依赖其可见性做热路径门控。
     @Volatile
     var isEnabled = false
@@ -84,7 +90,8 @@ object AppLog {
     fun init(context: Context) {
         appContext = context.applicationContext
         prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        isEnabled = prefs.getBoolean(KEY_ENABLED, false)
+        // debug 包默认开（排查依赖日志），release 默认关；用户手动设置后以 prefs 为准
+        isEnabled = prefs.getBoolean(KEY_ENABLED, BuildConfig.DEBUG)
         crashLogDir = File(context.filesDir, CRASH_LOG_DIR)
         installCrashHandler()
     }
@@ -130,21 +137,39 @@ object AppLog {
     fun exportSnapshot(): File? {
         val context = appContext ?: return null
         return runCatching {
-            val fileName = "mytvb_log_${
+            val fileName = "MyBLBL_log_${
                 SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault())
                     .format(System.currentTimeMillis())
             }.txt"
-            val logsDir = File(context.getExternalFilesDir(null), "logs").apply {
+            val logsDir = File(context.getExternalFilesDir(null), SNAPSHOT_DIR).apply {
                 if (!exists()) mkdirs()
             }
-            File(logsDir, fileName).apply {
+            val file = File(logsDir, fileName).apply {
                 // 写入 UTF-8 BOM，避免 Windows 记事本等编辑器因无 BOM 误判为 GBK 导致中文乱码
                 outputStream().buffered().use { out ->
                     out.write(byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte()))
                     out.write(formatLogsAsText().toByteArray(Charsets.UTF_8))
                 }
             }
+            trimSnapshots(logsDir)
+            file
         }.getOrNull()
+    }
+
+    /** 只保留最近 SNAPSHOT_MAX_COUNT 份快照（含旧版 myblbl_log_ 前缀）。 */
+    private fun trimSnapshots(dir: File) {
+        runCatching {
+            val files = dir.listFiles()
+                ?.filter {
+                    it.isFile && it.name.endsWith(".txt") &&
+                        (it.name.startsWith(SNAPSHOT_PREFIX) || it.name.startsWith(LEGACY_SNAPSHOT_PREFIX))
+                }
+                ?.sortedByDescending { it.lastModified() }
+                .orEmpty()
+            if (files.size > SNAPSHOT_MAX_COUNT) {
+                files.drop(SNAPSHOT_MAX_COUNT).forEach { it.delete() }
+            }
+        }
     }
 
     /** 内存缓冲 + 崩溃日志合成的纯文本（导出/快照共用格式）。 */
@@ -272,14 +297,43 @@ object AppLog {
 
     fun e(tag: String, message: String, throwable: Throwable? = null) {
         if (!isEnabled) return
-        logToBuffer(LogEntry.LEVEL_ERROR, tag, message)
+        logToBuffer(LogEntry.LEVEL_ERROR, tag, appendThrowableChain(message, throwable))
         if (BuildConfig.DEBUG) runCatching { Log.e(tag, message, throwable) }
     }
 
     fun w(tag: String, message: String, throwable: Throwable? = null) {
         if (!isEnabled) return
-        logToBuffer(LogEntry.LEVEL_WARN, tag, message)
+        logToBuffer(LogEntry.LEVEL_WARN, tag, appendThrowableChain(message, throwable))
         if (BuildConfig.DEBUG) runCatching { Log.w(tag, message, throwable) }
+    }
+
+    /**
+     * 落盘消息附加异常链摘要（类名+消息，最多 3 层）。
+     *
+     * logcat 分支始终带完整堆栈，但内存缓冲（导出快照）此前只存 message，
+     * "Unexpected runtime error" 这类外层文案会把真实根因（如 vendor 解码器抛的
+     * RuntimeException）完全遮住；快照无系统 logcat 可看，必须在这里带上。
+     */
+    private fun appendThrowableChain(message: String, throwable: Throwable?): String {
+        if (throwable == null) {
+            return message
+        }
+        val chain = buildString {
+            var current: Throwable? = throwable
+            var depth = 0
+            while (current != null && depth < 3) {
+                if (depth > 0) {
+                    append(" <- ")
+                }
+                append(current.javaClass.simpleName)
+                current.message?.takeIf { it.isNotBlank() }?.let {
+                    append(": ").append(it.take(160))
+                }
+                current = current.cause
+                depth++
+            }
+        }
+        return "$message [$chain]"
     }
 
     fun v(tag: String, message: String) {

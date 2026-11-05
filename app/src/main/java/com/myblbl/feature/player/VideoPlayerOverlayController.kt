@@ -1,19 +1,13 @@
 package com.myblbl.feature.player
 
-import android.view.Gravity
-import android.view.KeyEvent
 import android.view.LayoutInflater
 import android.view.View
-import android.view.ViewGroup
 import android.view.ViewTreeObserver
 import android.view.animation.Animation
 import android.view.animation.AnimationUtils
-import android.widget.LinearLayout
 import android.widget.TextView
 
-import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatDialog
-import androidx.core.content.ContextCompat
 import androidx.core.view.isVisible
 import androidx.appcompat.app.AppCompatActivity
 import androidx.fragment.app.Fragment
@@ -21,9 +15,9 @@ import androidx.media3.common.util.UnstableApi
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
-import android.util.TypedValue
-import com.myblbl.core.ui.base.ScaledTextView
+import com.myblbl.core.common.log.AppLog
 import com.myblbl.R
+import com.myblbl.model.video.Owner
 import com.myblbl.model.video.VideoModel
 import com.myblbl.model.video.detail.VideoDetailModel
 import com.myblbl.ui.adapter.VideoAdapter
@@ -59,23 +53,28 @@ class VideoPlayerOverlayController(
     private val isViewActive: () -> Boolean
 ) {
 
-    private companion object {
-        const val SEASON_GROUP_SIZE = 50
-    }
+    /** 当前面板打开时控制栏处于隐藏态且未强制拉起（隐藏态 UP 直达），关闭后应保持隐藏。 */
+    private var controllerWasHiddenForOverlay: Boolean = false
 
-    fun showChooseEpisodeDialog() {
+    fun showChooseEpisodeDialog(fromHiddenDpad: Boolean = false) {
         val episodes = sessionCoordinator.getEpisodes()
         val selectedEpisodeIndex = sessionCoordinator.getSelectedEpisodeIndex()
         if (episodes.isEmpty()) {
             AppToast.show(activity, activity.getString(R.string.player_no_episodes_toast))
             return
         }
-        if (episodes.firstOrNull()?.source == VideoPlayerViewModel.EpisodeCatalogSource.UGC_SEASON) {
-            showSeasonEpisodeDialog(episodes, selectedEpisodeIndex)
-            return
+        // 合集（UGC）与连续剧/番剧（PGC）统一走贴右侧的竖版合集面板；
+        // 居中网格弹窗只留给多P视频
+        when (episodes.firstOrNull()?.source) {
+            VideoPlayerViewModel.EpisodeCatalogSource.UGC_SEASON,
+            VideoPlayerViewModel.EpisodeCatalogSource.PGC_EPISODES -> {
+                showSeasonEpisodeDialog(episodes, selectedEpisodeIndex, fromHiddenDpad)
+                return
+            }
+            else -> Unit
         }
         overlayCoordinator.rememberFocusRestoreTarget(PlayerOverlayCoordinator.FocusTarget.EPISODE_BUTTON)
-        keepControllerVisibleForOverlay()
+        keepControllerVisibleForOverlay(forceShowController = !fromHiddenDpad)
         uiCoordinator.transition(UiEvent.PanelOpened(PanelType.EPISODE))
 
         val dialog = AppCompatDialog(activity, R.style.DialogTheme)
@@ -104,25 +103,12 @@ class VideoPlayerOverlayController(
                 }
             }
         )
-        val catalogSource = episodes.firstOrNull()?.source ?: VideoPlayerViewModel.EpisodeCatalogSource.PAGES
         val currentVideoInfo = resolveCurrentVideoInfo()
 
         val currentPos = selectedEpisodeIndex + 1
         val totalCount = episodes.size
-        titleView?.text = when (catalogSource) {
-            VideoPlayerViewModel.EpisodeCatalogSource.UGC_SEASON -> {
-                val seasonTitle = latestVideoInfoProvider()?.view?.ugcSeason?.title.orEmpty()
-                "${activity.getString(R.string.player_collection)}${if (seasonTitle.isNotBlank()) "·$seasonTitle" else ""}($currentPos/$totalCount)"
-            }
-            VideoPlayerViewModel.EpisodeCatalogSource.PGC_EPISODES -> {
-                val pgcTitle = latestVideoInfoProvider()?.view?.title.orEmpty()
-                "${if (pgcTitle.isNotBlank()) pgcTitle else activity.getString(R.string.choose_episode)}($currentPos/$totalCount)"
-            }
-            VideoPlayerViewModel.EpisodeCatalogSource.PAGES -> {
-                "${activity.getString(R.string.choose_episode)}($currentPos/$totalCount)"
-            }
-        }
-        val showMoreInfo = catalogSource == VideoPlayerViewModel.EpisodeCatalogSource.PAGES && currentVideoInfo != null
+        titleView?.text = "${activity.getString(R.string.choose_episode)}($currentPos/$totalCount)"
+        val showMoreInfo = currentVideoInfo != null
         moreInfoButton?.isVisible = showMoreInfo
         moreInfoButton?.setOnClickListener(
             if (showMoreInfo) {
@@ -243,198 +229,48 @@ class VideoPlayerOverlayController(
     }
 
     /**
-     * 合集专属弹窗：贴屏幕右侧的竖版列表（B 站风格），
-     * 全集按 [SEASON_GROUP_SIZE] 个一组分 tab 展示；打开时焦点落在
-     * 正在播放视频所在分组的 tab 上，列表自动定位到正在播放的视频。
+     * 合集/连续剧选集弹窗：贴屏幕右侧的竖版列表（B 站风格），面板本体在
+     * [showSeasonEpisodePanelDialog]，这里只挂播放器自己的状态机
+     * （面板开合、控制条恢复、切集前置动作）与标题组装。
      */
     private fun showSeasonEpisodeDialog(
         episodes: List<VideoPlayerViewModel.PlayableEpisode>,
-        selectedEpisodeIndex: Int
+        selectedEpisodeIndex: Int,
+        fromHiddenDpad: Boolean = false
     ) {
         overlayCoordinator.rememberFocusRestoreTarget(PlayerOverlayCoordinator.FocusTarget.EPISODE_BUTTON)
-        keepControllerVisibleForOverlay()
+        keepControllerVisibleForOverlay(forceShowController = !fromHiddenDpad)
         uiCoordinator.transition(UiEvent.PanelOpened(PanelType.EPISODE))
 
-        // BACK 拦截：AppCompat 的 OnBackPressedDispatcher 会在窗口层截走 BACK、
-        // 不经过 view 树与 onKeyDown，必须用 callback 注册才能拦截。
-        // 焦点在视频列表内 → 回分组 tab 不关弹窗；否则走默认关闭。
-        var seasonDialogRef: SeasonEpisodeDialog? = null
-        var recyclerViewRef: RecyclerView? = null
-        var backToTabAction: (() -> Unit)? = null
-        fun isFocusInsideSeasonList(): Boolean =
-            isFocusInsideRecyclerView(seasonDialogRef?.window?.currentFocus, recyclerViewRef)
-        val dialog = SeasonEpisodeDialog(
-            activity,
-            backPressedHandler = {
-                if (isFocusInsideSeasonList()) {
-                    backToTabAction?.invoke()
-                    false
-                } else {
-                    true
-                }
+        val posText = "(${selectedEpisodeIndex + 1}/${episodes.size})"
+        val title = when (episodes.firstOrNull()?.source) {
+            // 连续剧/番剧：标题栏直接用剧名（与原居中弹窗的标题规则一致）
+            VideoPlayerViewModel.EpisodeCatalogSource.PGC_EPISODES -> {
+                val pgcTitle = latestVideoInfoProvider()?.view?.title.orEmpty()
+                "${if (pgcTitle.isNotBlank()) pgcTitle else activity.getString(R.string.choose_episode)}$posText"
             }
-        ).also { seasonDialogRef = it }
-        dialog.setCanceledOnTouchOutside(true)
-        // 贴屏幕右侧、垂直居中；宽高由布局根节点固定（px600×px935），
-        // 卡片经 fill 载体右侧对齐，自动钳 92% 屏高
-        DialogWindowFit.overlay(
-            dialog,
-            LayoutInflater.from(activity).inflate(R.layout.dialog_choose_episode_season, null),
-            activity.resources.getDimensionPixelSize(R.dimen.px600),
-            heightPx = activity.resources.getDimensionPixelSize(R.dimen.px935),
-            gravity = Gravity.END or Gravity.CENTER_VERTICAL,
-            tag = "seasonEpisode"
-        )
-
-        val titleView = dialog.findViewById<TextView>(R.id.top_title)
-        val recyclerView = dialog.findViewById<RecyclerView>(R.id.recyclerView)
-        val tabBar = dialog.findViewById<LinearLayout>(R.id.tab_bar)
-        if (recyclerView == null || tabBar == null) {
-            dialog.dismiss()
-            return
+            else -> {
+                val seasonTitle = latestVideoInfoProvider()?.view?.ugcSeason?.title.orEmpty()
+                "${activity.getString(R.string.player_collection)}${if (seasonTitle.isNotBlank()) "·$seasonTitle" else ""}$posText"
+            }
         }
-        recyclerViewRef = recyclerView
 
-        val seasonTitle = latestVideoInfoProvider()?.view?.ugcSeason?.title.orEmpty()
-        titleView?.text =
-            "${activity.getString(R.string.player_collection)}${if (seasonTitle.isNotBlank()) "·$seasonTitle" else ""}(${selectedEpisodeIndex + 1}/${episodes.size})"
-
-        val groups = episodes.chunked(SEASON_GROUP_SIZE)
-        var activeGroup = (selectedEpisodeIndex / SEASON_GROUP_SIZE).coerceIn(0, groups.lastIndex)
-        val tabViews = mutableListOf<TextView>()
-
-        fun backToSeasonTab() {
-            tabViews.getOrNull(activeGroup)?.requestFocus()
-        }
-        backToTabAction = { backToSeasonTab() }
-
-        val panelAdapter = PlayerSeasonEpisodePanelAdapter(
-            onClick = { globalIndex ->
-                dialog.dismiss()
+        showSeasonEpisodePanelDialog(
+            activity = activity,
+            title = title,
+            episodes = episodes,
+            selectedEpisodeIndex = selectedEpisodeIndex,
+            onPlayEpisode = { index ->
                 onHideNextPreview()
-                onPlayEpisode(globalIndex)
+                onPlayEpisode(index)
             },
-            onBackToTab = { backToSeasonTab() }
-        )
-        recyclerView.layoutManager = LinearLayoutManager(activity)
-        recyclerView.adapter = panelAdapter
-
-        fun selectSeasonGroup(index: Int) {
-            activeGroup = index
-            tabViews.forEachIndexed { i, tab -> tab.isSelected = i == index }
-            val offset = index * SEASON_GROUP_SIZE
-            panelAdapter.submitGroup(groups[index], offset, selectedEpisodeIndex)
-            // 默认定位到正在播放的视频；该组没有播放项则回到组首
-            val localIndex = selectedEpisodeIndex - offset
-            recyclerView.scrollToPosition(
-                if (localIndex in groups[index].indices) localIndex else 0
-            )
-        }
-
-        fun enterSeasonListTarget(index: Int): Int {
-            val localIndex = selectedEpisodeIndex - index * SEASON_GROUP_SIZE
-            return if (localIndex in groups[index].indices) localIndex else 0
-        }
-
-        groups.forEachIndexed { index, group ->
-            val start = index * SEASON_GROUP_SIZE + 1
-            val end = index * SEASON_GROUP_SIZE + group.size
-            val tab = buildSeasonTab("$start-$end")
-            tab.setOnFocusChangeListener { _, hasFocus ->
-                tab.setTextColor(
-                    ContextCompat.getColor(
-                        activity,
-                        if (hasFocus) R.color.colorAccent else R.color.textColor
-                    )
-                )
-                // 焦点在 tab 间移动即联动切换对应分组列表
-                if (hasFocus) selectSeasonGroup(index)
-            }
-            tab.setOnClickListener { tab.requestFocus() }
-            // 边缘处的左右键直接消费，焦点停在边界 tab 上
-            tab.setOnKeyListener { _, keyCode, event ->
-                if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
-                when (keyCode) {
-                    KeyEvent.KEYCODE_DPAD_LEFT -> {
-                        if (index > 0) tabViews[index - 1].requestFocus()
-                        true
-                    }
-                    KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                        if (index < tabViews.lastIndex) tabViews[index + 1].requestFocus()
-                        true
-                    }
-                    KeyEvent.KEYCODE_DPAD_DOWN -> {
-                        focusTargetEpisode(recyclerView, enterSeasonListTarget(index))
-                        true
-                    }
-                    else -> false
-                }
-            }
-            tabBar.addView(tab)
-            tabViews.add(tab)
-        }
-
-        selectSeasonGroup(activeGroup)
-
-        // 初始焦点：优先落在正在播放的视频上；拿不到播放信息时才落分组 tab
-        fun requestInitialSeasonFocus() {
-            val localIndex = selectedEpisodeIndex - activeGroup * SEASON_GROUP_SIZE
-            if (localIndex in groups[activeGroup].indices) {
-                focusTargetEpisode(recyclerView, localIndex)
-            } else {
-                tabViews.getOrNull(activeGroup)?.requestFocus()
-            }
-        }
-
-        dialog.window?.decorView?.viewTreeObserver?.addOnWindowFocusChangeListener(
-            object : ViewTreeObserver.OnWindowFocusChangeListener {
-                override fun onWindowFocusChanged(hasFocus: Boolean) {
-                    if (hasFocus) {
-                        dialog.window?.decorView?.viewTreeObserver
-                            ?.removeOnWindowFocusChangeListener(this)
-                        requestInitialSeasonFocus()
-                    }
+            onDismiss = {
+                uiCoordinator.transition(UiEvent.PanelClosed)
+                if (isViewActive()) {
+                    restoreControllerAfterOverlay()
                 }
             }
         )
-
-        dialog.setOnDismissListener {
-            uiCoordinator.transition(UiEvent.PanelClosed)
-            if (isViewActive()) {
-                restoreControllerAfterOverlay()
-            }
-        }
-        dialog.show()
-        // 布局完成后兜底设初始焦点；窗口焦点监听在部分路径（触摸唤起）下时机不稳
-        recyclerView.post {
-            if (dialog.isShowing) {
-                requestInitialSeasonFocus()
-            }
-        }
-    }
-
-    private fun buildSeasonTab(label: String): ScaledTextView {
-        val res = activity.resources
-        return ScaledTextView(activity).apply {
-            text = label
-            setTextSize(TypedValue.COMPLEX_UNIT_PX, res.getDimension(R.dimen.px24))
-            setTextColor(ContextCompat.getColor(activity, R.color.textColor))
-            setBackgroundResource(R.drawable.cell_background)
-            setPadding(
-                res.getDimensionPixelSize(R.dimen.px25),
-                res.getDimensionPixelSize(R.dimen.px15),
-                res.getDimensionPixelSize(R.dimen.px25),
-                res.getDimensionPixelSize(R.dimen.px15)
-            )
-            isFocusable = true
-            isClickable = true
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply {
-                marginEnd = res.getDimensionPixelSize(R.dimen.px15)
-            }
-        }
     }
 
     /**
@@ -667,6 +503,16 @@ class VideoPlayerOverlayController(
             AppToast.show(activity, activity.getString(R.string.player_up_info_not_loaded))
             return
         }
+        showOwnerDetailDialog(owner)
+    }
+
+    /**
+     * 打开用户主页弹窗（评论面板菜单键传入评论用户的 Owner 复用同一路径）。
+     * currentAid/currentVideoId/currentSeasonId 仍取当前视频：仅用于合集/投稿 tab
+     * 定位「正在播放」项，他人主页无此视频时无副作用。
+     */
+    fun showOwnerDetailDialog(owner: Owner) {
+        val view = latestVideoInfoProvider()?.view
         overlayCoordinator.rememberFocusRestoreTarget(PlayerOverlayCoordinator.FocusTarget.OWNER_BUTTON)
         keepControllerVisibleForOverlay()
         uiCoordinator.transition(UiEvent.PanelOpened(PanelType.OWNER))
@@ -678,9 +524,9 @@ class VideoPlayerOverlayController(
                 onHideNextPreview()
                 onPlayRelatedVideo(video, playQueue)
             },
-            currentAid = view.aid,
-            currentVideoId = view.bvid,
-            currentSeasonId = view.ugcSeason?.id ?: 0L
+            currentAid = view?.aid ?: 0L,
+            currentVideoId = view?.bvid.orEmpty(),
+            currentSeasonId = view?.ugcSeason?.id ?: 0L
         ).apply {
             setOnDismissListener {
                 uiCoordinator.transition(UiEvent.PanelClosed)
@@ -706,6 +552,12 @@ class VideoPlayerOverlayController(
             aid = video.aid,
             upMid = video.owner?.mid ?: 0L,
             commentCount = video.stat?.reply ?: 0L,
+            // 面板已在回调前自行 dismiss（PanelClosed/焦点恢复正常走完），这里直接开主页
+            onOpenOwnerSpace = { item ->
+                showOwnerDetailDialog(
+                    Owner(mid = item.mid, name = item.userName, face = item.avatarUrl.orEmpty())
+                )
+            },
             onDismissed = {
                 uiCoordinator.transition(UiEvent.PanelClosed)
                 if (isViewActive()) {
@@ -715,22 +567,34 @@ class VideoPlayerOverlayController(
         ).showPanel()
     }
 
-    private fun keepControllerVisibleForOverlay() {
-        if (!playerView.isControllerFullyVisible()) {
+    /**
+     * 面板打开期间保持控制栏可见：挂起自动隐藏调度（show 动画结束回调的
+     * 重挂也被拦截，否则面板开着约 3 秒后控制栏会自动缩回）。
+     *
+     * @param forceShowController false=控制栏隐藏态直达面板（控制栏隐藏时按 UP
+     * 直达选集/合集）：不强制拉起控制栏，面板关闭后也保持隐藏（v2.1.14 反馈）。
+     */
+    private fun keepControllerVisibleForOverlay(forceShowController: Boolean = true) {
+        controllerWasHiddenForOverlay =
+            !forceShowController && !playerView.isControllerFullyVisible()
+        if (forceShowController && !playerView.isControllerFullyVisible()) {
             playerView.showController()
         }
-        playerView.removeControllerHideCallbacks()
+        playerView.setControllerHideCallbacksSuspended(true)
     }
 
     private fun restoreControllerAfterOverlay() {
-        if (!playerView.isControllerFullyVisible()) {
+        val keepHidden = controllerWasHiddenForOverlay
+        controllerWasHiddenForOverlay = false
+        if (!keepHidden && !playerView.isControllerFullyVisible()) {
             playerView.showController()
         }
         // 延迟请求焦点，等控制器完全显示后再恢复，避免控制器还在隐藏/动画状态导致焦点请求失败
         playerView.post {
             overlayCoordinator.restoreFocus(playerView)
         }
-        playerView.resetControllerHideCallbacks()
+        // 解除挂起并立即按当前可见状态恢复一次自动隐藏调度
+        playerView.setControllerHideCallbacksSuspended(false)
     }
 
     private fun restoreControllerAfterRelatedPanel() {
@@ -738,7 +602,7 @@ class VideoPlayerOverlayController(
         // Only restore focus and reset auto-hide timers — avoid calling showController() which
         // posts requestPlayPauseFocus() and causes a visible focus flicker.
         playerView.restoreRememberedFocus()
-        playerView.resetControllerHideCallbacks()
+        playerView.setControllerHideCallbacksSuspended(false)
     }
 
     private fun setupRelatedPanelFocusTrap() {
@@ -784,40 +648,4 @@ class VideoPlayerOverlayController(
         }
         relatedPanelFocusListener = null
     }
-}
-
-/**
- * 合集选集弹窗。BACK 键由 AppCompat 的 OnBackPressedDispatcher 在窗口层
- * 直接消费（不经过 view 树与 onKeyDown），所以通过 [backPressedHandler]
- * 注册 callback 拦截：返回 false 表示已处理（回 tab 不关弹窗），
- * 返回 true 走默认关闭流程。
- */
-private class SeasonEpisodeDialog(
-    context: AppCompatActivity,
-    backPressedHandler: () -> Boolean
-) : AppCompatDialog(context, R.style.DialogTheme) {
-
-    init {
-        onBackPressedDispatcher.addCallback(
-            object : OnBackPressedCallback(true) {
-                override fun handleOnBackPressed() {
-                    if (backPressedHandler()) {
-                        // 默认行为：关闭弹窗（等价 onBackPressed → cancel）
-                        this@SeasonEpisodeDialog.cancel()
-                    }
-                    // 否则已由 handler 处理（焦点回 tab），弹窗保持打开
-                }
-            }
-        )
-    }
-}
-
-private fun isFocusInsideRecyclerView(focus: View?, recyclerView: RecyclerView?): Boolean {
-    if (focus == null || recyclerView == null) return false
-    var v: View? = focus
-    while (v != null) {
-        if (v === recyclerView) return true
-        v = v.parent as? View
-    }
-    return false
 }

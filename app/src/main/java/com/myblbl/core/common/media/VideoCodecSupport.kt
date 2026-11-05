@@ -12,12 +12,15 @@ import android.view.Display
 import androidx.annotation.OptIn
 import androidx.media3.common.C
 import androidx.media3.common.Format
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.RendererCapabilities
 import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
+import androidx.media3.exoplayer.mediacodec.MediaCodecUtil
 import androidx.media3.exoplayer.video.MediaCodecVideoRenderer
 import com.myblbl.core.common.log.AppLog
 import com.myblbl.model.video.quality.VideoCodecEnum
+import com.myblbl.model.video.quality.VideoQuality
 
 object VideoCodecSupport {
 
@@ -228,13 +231,102 @@ object VideoCodecSupport {
     @OptIn(UnstableApi::class)
     fun videoCodecSelector(): MediaCodecSelector =
         MediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunnelingDecoder ->
+            // FLAC 恒走 FFmpeg 软解（issue#101）：系统 c2.android.flac.decoder 的 input buffer
+            // 上限 32KB，解不了 Hi-Res 无损的 34KB+ 大帧，feedInputBuffer 走「跳样本+flush」
+            // 容错 → 音频逐帧丢弃 + sink 断言违例，听感一卡一卡。这里在解码器查找层直接返回
+            // 空列表：系统 MediaCodecAudioRenderer 对 audio/flac 判 FORMAT_UNSUPPORTED_TYPE
+            // （真 NO，exceedRendererCapabilitiesIfNecessary 参数救不活），渲染器选择阶段就让位
+            // 给 FFmpeg 扩展（EXTENSION_RENDERER_MODE_ON 排在系统之后），大帧由 FFmpeg 根治。
+            // 此前用「包装系统渲染器覆写 supportsFormat」的方案实测拦不住（华为真机 FLAC 仍
+            // init 系统 flac.decoder），解码器查找层是 renderer 支持度判定的唯一数据源，无死角。
+            if (mimeType.equals(MimeTypes.AUDIO_FLAC, ignoreCase = true)) {
+                return@MediaCodecSelector emptyList()
+            }
             val selector = if (mimeType.lowercase().startsWith("video/") && isSoftwareDecoderPreferred()) {
                 MediaCodecSelector.PREFER_SOFTWARE
             } else {
                 MediaCodecSelector.DEFAULT
             }
-            selector.getDecoderInfos(mimeType, requiresSecureDecoder, requiresTunnelingDecoder)
+            val decoders = selector.getDecoderInfos(mimeType, requiresSecureDecoder, requiresTunnelingDecoder)
+            if (mimeType.equals(MimeTypes.VIDEO_DOLBY_VISION, ignoreCase = true) && !isSoftwareDecoderPreferred()) {
+                prependHevcDolbyVisionDecoders(decoders)
+            } else {
+                decoders
+            }
         }
+
+    /**
+     * 给杜比视界解码器候选表前插「HEVC 容器 DV」组件（名字含 dvhe/dvh1 的硬解）。
+     *
+     * 背景（海信 MT9952 实测）：MTK 的 c2.mtk.dvhe.* 组件在 MediaCodecList 里不注册
+     * video/dolby-vision 类型，media3 默认选择器永远查不到它们；而注册了该类型的
+     * dvav 系组件（AVC/AV1 容器 DV）解不了 HEVC-DV 码流。B 站 126 档恰是 HEVC 容器
+     * DV 流，这里按组件名定向补位并排到最前，让渲染器优先落到真正的 dvhe 组件上；
+     * 后续 dvhe 组件初始化失败时仍有 decoderFallback 逐个回退（dvav → 报错走
+     * PlaybackFallbackController 换编码），不会卡死。
+     *
+     * 软解偏好时不前插：用户显式选软解的意图优先（DV 无软解，交给回退链处理）。
+     */
+    @OptIn(UnstableApi::class)
+    private fun prependHevcDolbyVisionDecoders(decoders: List<androidx.media3.exoplayer.mediacodec.MediaCodecInfo>):
+        List<androidx.media3.exoplayer.mediacodec.MediaCodecInfo> {
+        val existing = decoders.toMutableList()
+        val injected = ArrayList<androidx.media3.exoplayer.mediacodec.MediaCodecInfo>()
+        runCatching {
+            MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos
+                .asSequence()
+                .filter { androidInfo -> !androidInfo.isEncoder }
+                .filter(::isHardwareDecoder)
+                .filter { androidInfo ->
+                    val name = androidInfo.name.lowercase()
+                    name.contains("dvhe") || name.contains("dvh1")
+                }
+                .forEach { androidInfo ->
+                    if (existing.any { it.name == androidInfo.name }) return@forEach
+                    val codecMimeType = androidInfo.supportedTypes.firstOrNull() ?: return@forEach
+                    val capabilities = runCatching {
+                        androidInfo.getCapabilitiesForType(codecMimeType)
+                    }.getOrNull()
+                    val vendor = androidInfo.name.lowercase().let {
+                        it.startsWith("omx.") || it.startsWith("c2.")
+                    }
+                    injected.add(
+                        androidx.media3.exoplayer.mediacodec.MediaCodecInfo.newInstance(
+                            androidInfo.name,
+                            MimeTypes.VIDEO_DOLBY_VISION,
+                            codecMimeType,
+                            capabilities,
+                            /* hardwareAccelerated = */ true,
+                            /* softwareOnly = */ false,
+                            vendor,
+                            /* forceDisableAdaptive = */ false,
+                            /* forceSecure = */ false
+                        )
+                    )
+                }
+        }
+        if (injected.isEmpty()) return decoders
+        if (!loggedDolbyVisionInjection) {
+            loggedDolbyVisionInjection = true
+            AppLog.i(
+                TAG,
+                "dolby vision decoder injection: ${injected.joinToString { it.name }} " +
+                    "codecMimes=${injected.map { it.codecMimeType }.distinct()}"
+            )
+        }
+        return injected + existing
+    }
+
+    @Volatile
+    private var loggedDolbyVisionInjection: Boolean = false
+
+    /**
+     * 杜比视界 MPD 改写值：两段式串（无 level 段）。media3 对该形态既不做
+     * profile/level 能力拒绝（解析不出 profile 即假定支持），也不触发 HEVC
+     * base-layer 回落（拿不到 profile 无法判可回落），从而把流严格交给
+     * video/dolby-vision 解码器处理（配合上面的 dvhe 组件前插）。
+     */
+    const val DOLBY_VISION_REWRITE_CODECS = "dvhe.05"
 
     /**
      * 该视频轨本机能否解码——复用 media3 [MediaCodecVideoRenderer.supportsFormat] 全规格判定
@@ -300,11 +392,17 @@ object VideoCodecSupport {
      */
     fun defaultPreferredCodec(context: Context): VideoCodecEnum {
         cachedDefaultCodec?.let { return it }
-        val result = if (isSuspectMediatekTvDevice(context)) {
+        val mtkSuspect = isSuspectMediatekTvDevice(context)
+        val result = if (mtkSuspect) {
             VideoCodecEnum.AVC
         } else {
             VideoCodecEnum.HEVC
         }
+        AppLog.i(
+            TAG,
+            "codec default: mtk-suspect=$mtkSuspect tv=${isTvDevice(context)} " +
+                "default=$result markers=${buildDeviceMarkers()}"
+        )
         cachedDefaultCodec = result
         return result
     }
@@ -316,20 +414,25 @@ object VideoCodecSupport {
     private val mediatekChipPattern = Regex("(^|[| _\\-/])mt\\d{4}")
 
     private fun isSuspectMediatekTvDevice(context: Context): Boolean {
-        val isTv = (context.resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK) ==
-            Configuration.UI_MODE_TYPE_TELEVISION
-        if (!isTv) return false
-        val markers = buildString {
-            append(Build.HARDWARE).append('|')
-            append(Build.BOARD).append('|')
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                append(Build.SOC_MODEL).append('|')
-                append(Build.SOC_MANUFACTURER)
-            }
-        }.lowercase()
+        if (!isTvDevice(context)) return false
+        val markers = buildDeviceMarkers()
         if (markers.contains("mediatek")) return true
         return mediatekChipPattern.containsMatchIn(markers)
     }
+
+    private fun isTvDevice(context: Context): Boolean =
+        (context.resources.configuration.uiMode and Configuration.UI_MODE_TYPE_MASK) ==
+            Configuration.UI_MODE_TYPE_TELEVISION
+
+    /** 参与芯片识别的设备字段原文（小写、| 分隔）；识别未命中时据此回溯该往规则里补什么特征。 */
+    private fun buildDeviceMarkers(): String = buildString {
+        append(Build.HARDWARE).append('|')
+        append(Build.BOARD).append('|')
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            append(Build.SOC_MODEL).append('|')
+            append(Build.SOC_MANUFACTURER)
+        }
+    }.lowercase()
 
     @Suppress("unused")
     fun isHdrSupported(context: Context? = null): Boolean {
@@ -350,10 +453,15 @@ object VideoCodecSupport {
     @Suppress("unused")
     fun isDolbyVisionSupported(context: Context? = null): Boolean {
         cachedDolbyVisionSupported?.let { return it }
-        val decoderOk = hasDecoder("video/dolby-vision") ||
+        val mediaCodecListHit = hasDecoder("video/dolby-vision") ||
             hasDecoder("video/dvhe") ||
             hasDecoder("video/dvav")
-        if (!decoderOk) {
+        val media3Hit = hasMedia3DolbyVisionDecoder()
+        AppLog.i(
+            TAG,
+            "dolby vision decoder probe: mediaCodecList=$mediaCodecListHit media3=$media3Hit"
+        )
+        if (!mediaCodecListHit && !media3Hit) {
             cachedDolbyVisionSupported = false
             return false
         }
@@ -363,6 +471,66 @@ object VideoCodecSupport {
         val result = hasDolbyVisionDisplaySupport(context)
         cachedDolbyVisionSupported = result
         return result
+    }
+
+    /**
+     * 该视频轨是否为杜比视界流。
+     *
+     * B 站 126 档杜比视界流的 codecs 是 HEVC 形态（实测 hvc1.2.4.H150.90），不带 dvhe
+     * 前缀，必须按档位 id 判定；dvhe/dvh1/dovi 前缀与 MIME 判定兜底其它下发形态。
+     */
+    fun isDolbyVisionTrack(qualityId: Int, mimeType: String?, codecs: String?): Boolean {
+        if (qualityId == VideoQuality.QUALITY_DOLBY_VISION.id) return true
+        if (mimeType?.lowercase()?.contains("dolby-vision") == true) return true
+        val c = codecs?.lowercase().orEmpty()
+        return c.startsWith("dvhe") || c.startsWith("dvh1") || c.contains("dovi")
+    }
+
+    /**
+     * 杜比全景声音轨（B 站 id=30250，EAC3 码流，API 泛标 ac-3）本机能否真正出声。
+     *
+     * 判定两路并联：系统 MediaCodecList 有 audio/ac-3 或 audio/eac3 解码器（电视常见，
+     * 走硬解）；或 media3 FFmpeg 扩展可用（org.jellyfin.media3:media3-ffmpeg-decoder，
+     * eac3 解码器为 AC-3/E-AC-3 超集实现）。两者皆无的设备 media3 对解不了的音频轨
+     * 不报错、直接跳轨，表现为「视频正常但无声」（华为真机实测：切杜比全景声后
+     * audio decoder init 一次都不出现）。音轨选择前用它预检：UI 主动选择时拦截提示，
+     * 初始偏好/重建选轨时回落到可用 AAC 档。
+     */
+    fun isDolbyAtmosTrackPlayable(): Boolean {
+        cachedDolbyAtmosPlayable?.let { return it }
+        val systemDecoder = hasDecoder("audio/ac-3") || hasDecoder("audio/eac3")
+        val ffmpegDecoder = runCatching {
+            androidx.media3.decoder.ffmpeg.FfmpegLibrary.supportsFormat(
+                androidx.media3.common.MimeTypes.AUDIO_E_AC3
+            )
+        }.getOrDefault(false)
+        val result = systemDecoder || ffmpegDecoder
+        AppLog.i(
+            TAG,
+            "dolby atmos decoder probe: playable=$result " +
+                "system=$systemDecoder ffmpeg=$ffmpegDecoder"
+        )
+        cachedDolbyAtmosPlayable = result
+        return result
+    }
+
+    @Volatile
+    private var cachedDolbyAtmosPlayable: Boolean? = null
+
+    /**
+     * media3 级杜比视界解码器查询，与 [hasDecoder] 的 MediaCodecList 原生查询并联：
+     * media3 额外认厂商私有别名（如 OMX.MS.HEVCDV 的 video/hevcdv、RealTek 的
+     * video/dv_hevc），部分电视只以别名暴露 DV 解码器。
+     */
+    @OptIn(UnstableApi::class)
+    private fun hasMedia3DolbyVisionDecoder(): Boolean {
+        return runCatching {
+            MediaCodecUtil.getDecoderInfos(
+                MimeTypes.VIDEO_DOLBY_VISION,
+                /* requiresSecureDecoder = */ false,
+                /* requiresTunnelingDecoder = */ false
+            ).isNotEmpty()
+        }.getOrDefault(false)
     }
 
     private fun hasDecoder(mimeType: String): Boolean {

@@ -2,6 +2,7 @@ package com.myblbl.core.common.log
 
 import android.content.Context
 import android.os.Build
+import android.os.SystemClock
 import com.google.gson.Gson
 import com.myblbl.BuildConfig
 import java.io.BufferedInputStream
@@ -39,10 +40,13 @@ class LanLogServer(private val context: Context) {
     companion object {
         private const val INDEX_ASSET_PATH = "lan_log/index.html"
         private const val SNAPSHOT_DIR_NAME = "logs"
-        private const val SNAPSHOT_PREFIX = "mytvb_log_"
+        private const val SNAPSHOT_PREFIX = "MyBLBL_log_"
         // 旧版导出前缀，白名单仍放行以便下载历史快照
         private const val LEGACY_SNAPSHOT_PREFIX = "myblbl_log_"
         private const val SOCKET_TIMEOUT_MS = 10_000
+        // 冷却期内重复请求复用同一份快照：手机浏览器对 attachment 下载常是
+        // WebView 探测 + 下载器重发两次请求（或用户双击），每次都新建会落成对文件
+        private const val SNAPSHOT_REUSE_WINDOW_MS = 10_000L
         private val gson = Gson()
     }
 
@@ -51,6 +55,12 @@ class LanLogServer(private val context: Context) {
 
     @Volatile
     private var acceptThread: Thread? = null
+
+    @Volatile
+    private var lastSnapshotFile: File? = null
+
+    @Volatile
+    private var lastSnapshotAtMs: Long = 0
 
     private var connectionPool: ExecutorService? = null
 
@@ -89,6 +99,8 @@ class LanLogServer(private val context: Context) {
         connectionPool?.shutdown()
         connectionPool = null
         acceptThread = null
+        lastSnapshotFile = null
+        lastSnapshotAtMs = 0
     }
 
     /** 展示用完整地址（首个非环回 IPv4）。 */
@@ -232,7 +244,7 @@ class LanLogServer(private val context: Context) {
     }
 
     private fun handleCreateSnapshot(socket: Socket) {
-        val file = AppLog.exportSnapshot()
+        val file = obtainSnapshot()
         if (file == null || !file.exists()) {
             respond(socket, 500, "Internal Server Error", "application/json; charset=utf-8",
                 """{"error":"create snapshot failed"}""")
@@ -241,12 +253,26 @@ class LanLogServer(private val context: Context) {
         respondFile(socket, file)
     }
 
+    /** 生成快照，冷却窗口内直接复用上一份，避免一次点击落成对文件。 */
+    private fun obtainSnapshot(): File? = synchronized(this) {
+        val last = lastSnapshotFile
+        if (last != null && last.exists() &&
+            SystemClock.elapsedRealtime() - lastSnapshotAtMs < SNAPSHOT_REUSE_WINDOW_MS
+        ) {
+            return last
+        }
+        val fresh = AppLog.exportSnapshot() ?: return null
+        lastSnapshotFile = fresh
+        lastSnapshotAtMs = SystemClock.elapsedRealtime()
+        fresh
+    }
+
     // ── 文件白名单 ────────────────────────────────────────────────────
 
     /** 崩溃日志白名单：AppLog 管理的 crash_logs 目录 + 旧版 debug.txt。 */
     private fun listCrashFiles(): List<File> = AppLog.getCrashLogFiles()
 
-    /** 快照白名单：外部私有目录 logs/ 下 mytvb_log_*.txt（含旧版 myblbl_log_ 前缀）。 */
+    /** 快照白名单：外部私有目录 logs/ 下 MyBLBL_log_*.txt（含旧版 myblbl_log_ 前缀）。 */
     private fun listSnapshotFiles(): List<File> {
         val dir = File(context.getExternalFilesDir(null), SNAPSHOT_DIR_NAME)
         return runCatching {

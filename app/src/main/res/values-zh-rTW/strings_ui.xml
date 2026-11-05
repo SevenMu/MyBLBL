@@ -21,6 +21,8 @@
 
     <!-- ===== adapter：列表項綁定文字 ===== -->
     <string name="adapter_watched_complete">已看完</string>
+    <string name="adapter_live_streaming">直播中</string>
+    <string name="adapter_live_not_started">未開播</string>
     <string name="adapter_portrait">直式</string>
     <string name="adapter_favorited_at_format">收藏於%1$s</string>
     <string name="adapter_default_sign">這個人很懶，什麼都沒寫</string>
@@ -105,7 +107,6 @@
     <string name="model_search_order_pub_date">最新發布</string>
     <string name="model_search_order_dm">最多彈幕</string>
     <string name="model_search_order_most_collection">最多收藏</string>
-    <string name="model_search_order_most_comment">最多留言</string>
 
     <!-- ===== core：通用基礎設施文案（時間/數字/徽章/青少年模式） ===== -->
     <string name="core_badge_charge_exclusive">充電專屬</string>

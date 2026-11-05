@@ -5,21 +5,34 @@ import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Handler
 import android.os.Looper
+import androidx.annotation.OptIn
+import java.nio.ByteBuffer
+import androidx.media3.common.C
+import androidx.media3.common.Format
+import androidx.media3.common.MimeTypes
+import androidx.media3.common.Player
+import androidx.media3.common.Tracks
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.Renderer
+import androidx.media3.exoplayer.RendererCapabilities
+import androidx.media3.exoplayer.audio.AudioRendererEventListener
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.AudioTrackAudioOutputProvider
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioTrackBufferSizeProvider
+import androidx.media3.exoplayer.audio.MediaCodecAudioRenderer
+import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import com.myblbl.core.common.log.AppLog
 import com.myblbl.core.common.media.VideoCodecSupport
 import com.myblbl.feature.player.settings.AudioBalanceSettings
 import com.myblbl.feature.player.settings.PlayerSettingsStore
+import com.myblbl.model.video.quality.VideoCodecEnum
 
 @UnstableApi
 object PlayerInstancePool {
@@ -117,6 +130,16 @@ object PlayerInstancePool {
         cancelPendingRelease()
         val player = cachedPlayer ?: buildPlayer(context.applicationContext).also {
             cachedPlayer = it
+        }
+        // 复用池实例时同步编码偏好的"冷启动兜底"：仅当 selector 上还从未注入过偏好时才用
+        // 设置里的默认编码打底。此前每次 acquire 无条件覆盖（设置默认编码），playInfo 返回后
+        // applySelectionSnapshot 再用会话编码覆盖回来——两次注入之间正是选轨窗口（seamless
+        // MPD 是内存串，setMediaSource 后 TrackGroup 几乎立即可见），选轨拿到的是 acquire 的
+        // 值而非会话值，出现"route plan/锁定写 HEVC、实际 init AV1"的分裂（issue#101 实测：
+        // 设置默认编码=AV1 的设备上锁 125-HEVC 必 init av1 解码器）。
+        // 注入源统一为会话值（applySelectionSnapshot），跨视频延续上个会话的编码选择。
+        if (lastPreferredVideoMime == null) {
+            setPreferredVideoCodec(PlayerSettingsStore.load(context).defaultVideoCodec)
         }
         // 复用实例可能还挂着上一个视频的 MediaSource 与播放位置（softDetach 只 stop
         // 不清 position、不清 MediaItems）。本次要播的身份与挂载源不一致时必须立即硬
@@ -263,6 +286,13 @@ object PlayerInstancePool {
         // 音量均衡档位在构建 sink 前同步到全局 store：AudioProcessor 创建后每次取块
         // 都读全局档位，设置页切换即时生效，无需重建播放器。
         AudioBalanceSettings.level = PlayerSettingsStore.load(context).audioBalance
+        // 视口压制失能（issue#101）：media3 默认用物理屏幕尺寸推算"值得下载的最大像素数"，
+        // 组内存在 ≤ 屏幕的轨时更大的 4K/HDR 轨会被判超约束（SELECTION_ELIGIBILITY_FIXED），
+        // 组间比较里 isWithinMaxConstraints 的优先级高于 preferredVideoMimeType——
+        // 锁定 125/126 档时 TrackSelector 会转而选择 1080p 自适应组，锁定被架空
+        // （电视实测 route plan 125-HEVC 实际 init AV1 解码器）。
+        // 全屏播放场景视频轨本就不该被屏幕尺寸截断，设 MAX_VALUE 让全部轨进自适应候选。
+        // 注入时机与编码偏好同步（setPreferredVideoCodec 同一 selector），每次构建必达。
         val isFastNetwork = isOnFastNetwork(context)
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
@@ -278,15 +308,86 @@ object PlayerInstancePool {
             // 不再丢弃数据重新走网络
             .setBackBuffer(DefaultLoadControl.DEFAULT_MAX_BUFFER_MS, true)
             .build()
+        // 无缝清晰度的组间钦点（锁定 qn/codec 直接选对应编码组，绕开 media3 组间比较的
+        // 不可控行为——issue#101 实测偏好注入方向正确仍被 AV1 组反超，见该类注释）。
+        val trackSelector = SeamlessQualityTrackSelector(context, SeamlessQualityTrackSelectionFactory())
+        // 全屏播放不按屏幕像素截断视频轨（见本函数头部说明）。MAX_VALUE 使
+        // getMaxVideoPixelsToRetainForViewport 直接短路返回 MAX_VALUE，全部轨 suitable。
+        trackSelector.setParameters(
+            trackSelector.buildUponParameters()
+                .setViewportSize(Int.MAX_VALUE, Int.MAX_VALUE, false)
+        )
+        activeTrackSelector = trackSelector
         return ExoPlayer.Builder(context)
             .setRenderersFactory(createRenderersFactory(context))
             .setLoadControl(loadControl)
             // 无缝清晰度切换：多清晰度 DASH MPD 源的视频轨选择交给 SeamlessQualitySelector
             // 控制；非无缝源（format.id 解析不出 qn/codec）自动退回默认自适应逻辑，行为不变。
-            .setTrackSelector(DefaultTrackSelector(context, SeamlessQualityTrackSelectionFactory()))
+            .setTrackSelector(trackSelector)
             .build()
             .also(PlayerPlaybackPolicy::apply)
+            .also { player ->
+                // 诊断锚点：DefaultTrackSelector 组间选择的最终结果（选中 representation 的
+                // id 含 qn/codec）。route plan 是应用层计划，此处是渲染器层事实，两者不一致
+                // 即选轨被架空（issue#101 电视 125-HEVC 计划实际 init AV1 的实证通道）。
+                player.addListener(object : Player.Listener {
+                    override fun onTracksChanged(tracks: Tracks) {
+                        for (group in tracks.groups) {
+                            if (group.type != C.TRACK_TYPE_VIDEO) continue
+                            for (i in 0 until group.length) {
+                                if (!group.isTrackSelected(i)) continue
+                                val format = group.getTrackFormat(i)
+                                AppLog.i(
+                                    TAG,
+                                    "track selection result: video=${format.id} " +
+                                        "${format.width}x${format.height} " +
+                                        "mime=${format.sampleMimeType} bitrate=${format.bitrate} " +
+                                        "support=${group.getTrackSupport(i)}"
+                                )
+                            }
+                        }
+                    }
+                })
+            }
     }
+
+    /**
+     * 应用层编码偏好注入选轨器（PR#104 遗留问题修复）。
+     *
+     * 现状：编码选择只作用于拉流路由与 seamless 锁组，media3 DefaultTrackSelector 收不到
+     * 偏好，跨编码组时按默认排序自选——华为真机 route plan 写 HEVC 实际却 instantiate
+     * c2.qti.av1.decoder（能播但不符意图），TCL Amlogic 上 AV1 硬解是坏的则白等 3 秒回退
+     * HEVC（issue#100 停摆的源头之一）。设置 preferredVideoMimeType 后选轨器优先选对应
+     * 编码组的轨，偏好组不可用时仍回退其他组（media3 原生回退语义）。
+     */
+    @OptIn(UnstableApi::class)
+    fun setPreferredVideoCodec(codec: VideoCodecEnum?) {
+        val selector = activeTrackSelector ?: return
+        val mime = when (codec) {
+            VideoCodecEnum.HEVC -> MimeTypes.VIDEO_H265
+            VideoCodecEnum.AV1 -> MimeTypes.VIDEO_AV1
+            VideoCodecEnum.AVC -> MimeTypes.VIDEO_H264
+            null -> null
+        }
+        if (lastPreferredVideoMime == mime) {
+            // 静默去重时也留一次参数快照：确认 selector 上的偏好仍然在位
+            // （池化复用/重建链路是否会丢参数，此前只能靠猜）。
+            AppLog.i(
+                TAG,
+                "track selection preferred video mime unchanged: $mime " +
+                    "(selector=${selector.parameters.preferredVideoMimeTypes})"
+            )
+            return
+        }
+        lastPreferredVideoMime = mime
+        selector.setParameters(selector.buildUponParameters().setPreferredVideoMimeType(mime))
+        AppLog.i(TAG, "track selection preferred video mime=$mime codec=$codec")
+    }
+
+    private var lastPreferredVideoMime: String? = null
+
+    @Volatile
+    private var activeTrackSelector: DefaultTrackSelector? = null
 
     fun createRenderersFactory(context: Context): DefaultRenderersFactory {
         // 每个 player 一枚音量均衡处理器：档位读全局 store，关档 passthrough（仅一次 buffer 拷贝）。
@@ -294,11 +395,17 @@ object PlayerInstancePool {
         return object : DefaultRenderersFactory(context.applicationContext) {
             init {
                 // 硬解优先链路：流选择层（VideoCodecSupport.orderCandidates）已保证尽量选有硬解的编码，
-                // 这里在渲染器层显式强化：允许解码器回退兜底（避免硬解瞬时失败导致无法播放），
-                // 同时优先选用扩展解码器（ExtensionRendererMode.PREFER）——在无 ffmpeg 扩展依赖时，
-                // 其效果等同把硬件 MediaCodec 渲染器排在最前。
+                // 这里在渲染器层显式强化：允许解码器回退兜底（避免硬解瞬时失败导致无法播放）。
                 setEnableDecoderFallback(true)
-                setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
+                // 音频扩展（FFmpeg）用 ON 而非 PREFER：系统解码器/直通优先，FFmpeg 只兜底。
+                // PREFER 曾让 FFmpeg 抢在系统 MediaCodecAudioRenderer 之前把 EAC-3 全部软解成
+                // PCM——电视的 EC-3 直通链路收不到原始码流，杜比全景声识别全灭（issue#101
+                // 2.1.21 实测，audio decoder=ffmpegLavc-eac3 实锤）；ON 模式下电视走系统解码
+                // /直通点亮全景声，无系统能力的手机（华为无 AC-3 授权）仍回落 FFmpeg 出声。
+                // FLAC 例外：系统 flac 解码器 32KB input buffer 解不了 Hi-Res 大帧（顿挫根源），
+                // 由 VideoCodecSupport.videoCodecSelector 在解码器查找层对 audio/flac 返回空，
+                // 恒定交给 FFmpeg。
+                setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
 
                 // 解码方式（硬解优先 / 软解）：与能力预检共用同一 selector（见
                 // VideoCodecSupport.videoCodecSelector），软解开关打开时 video/* 走
@@ -322,7 +429,7 @@ object PlayerInstancePool {
                 enableFloatOutput: Boolean,
                 enableAudioTrackPlaybackParams: Boolean
             ): AudioSink {
-                return DefaultAudioSink.Builder(context)
+                val delegate = DefaultAudioSink.Builder(context)
                     .setEnableFloatOutput(enableFloatOutput)
                     .setEnableAudioOutputPlaybackParameters(enableAudioTrackPlaybackParams)
                     // 1.9.3 的 setAudioProcessors 是普通数组参数（非 vararg），需显式包装。
@@ -338,6 +445,44 @@ object PlayerInstancePool {
                             .build()
                     )
                     .build()
+                return SkipSampleTolerantAudioSink(delegate)
+            }
+        }
+    }
+
+    /**
+     * 兜住 media3 1.9.3 skip-sample 容错路径与 DefaultAudioSink same-buffer 断言的状态冲突。
+     *
+     * 因果链（issue#101 海信 DV「一帧一帧卡顿」/ 华为真机 error code=1004 风暴实测定位）：
+     * B 站 Hi-Res 无损 FLAC（id=30251，2.28Mbps）单帧可达 34KB，超过 c2.android.flac.decoder
+     * 的 32KB input buffer → MediaCodecRenderer.feedInputBuffer 捕获 InsufficientCapacityException
+     * 后走「跳过该样本 + flushCodec()」容错；但 codec flush 后输出的 buffer 实例已更换，而
+     * DefaultAudioSink.handleBuffer 首行 checkArgument(inputBuffer==null || buffer==inputBuffer)
+     * 仍持旧实例未消费完 → 断言炸成 ExoPlaybackException TYPE_UNEXPECTED（code=1004），
+     * fallback 重建不换音轨 → 每轮必炸 → 错误风暴死循环（表现为视频一帧一帧播放）。
+     *
+     * 修法：断言违例时 flush 重置 sink 状态后重试一次（flush 会释放残留 inputBuffer 并清空
+     * 待写数据，代价为丢一小段音频，好于整轮崩溃重建）。二次失败则上抛走原错误链。
+     */
+    private class SkipSampleTolerantAudioSink(
+        private val delegate: AudioSink
+    ) : AudioSink by delegate {
+
+        override fun handleBuffer(
+            buffer: ByteBuffer,
+            presentationTimeUs: Long,
+            encodedAccessUnitCount: Int
+        ): Boolean {
+            return try {
+                delegate.handleBuffer(buffer, presentationTimeUs, encodedAccessUnitCount)
+            } catch (e: IllegalArgumentException) {
+                AppLog.w(
+                    TAG,
+                    "audio sink same-buffer assert violated, flush and retry " +
+                        "(skip-sample path after flac large frame): ${e.message}"
+                )
+                delegate.flush()
+                delegate.handleBuffer(buffer, presentationTimeUs, encodedAccessUnitCount)
             }
         }
     }

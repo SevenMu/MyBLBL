@@ -46,6 +46,9 @@
     <string name="player_mute_segment_toast_format">已靜音：%1$s</string>
     <string name="player_sponsor_category_sponsor">贊助/業配</string>
     <string name="player_sponsor_category_intro">過場/開場動畫</string>
+    <!-- 官方片頭片尾（pgc playurl clip_info_list） -->
+    <string name="official_clip_op">片頭</string>
+    <string name="official_clip_ed">片尾</string>
     <string name="player_sponsor_category_outro">鳴謝/結束畫面</string>
     <string name="player_sponsor_category_self_promo">無償/自我推廣</string>
     <string name="player_sponsor_category_interaction">三連/互動提醒</string>
@@ -96,6 +99,9 @@
     <string name="series_error_timeline_failed">時間軸載入失敗</string>
     <string name="series_error_recommend_failed">推薦載入失敗</string>
     <string name="player_hdr_unsupported_hint">電視或播放裝置可能不支援「%1$s」，若播放異常請切回其他畫質</string>
+    <string name="player_audio_track_silent_hint">裝置不支援「%1$s」解碼，已保持目前音軌</string>
+    <string name="player_quality_switching_hint">正在為您切換到「%1$s」，請稍候…</string>
+    <string name="player_quality_switched_hint">已切換至「%1$s」</string>
 
     <!-- 同时观看人数 / Online watching count -->
     <string name="online_watching_format">%1$s人正在看</string>

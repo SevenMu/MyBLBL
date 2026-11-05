@@ -244,6 +244,7 @@ class MyPlayerControlView @JvmOverloads constructor(
             buttonLine = buttonLine,
             buttonClose = buttonClose,
             buttonBack = buttonBack,
+            buttonPlaySpeed = buttonPlaySpeed,
             timeBar = timeBar,
             bottomBar = bottomBar
         )
@@ -946,6 +947,10 @@ class MyPlayerControlView @JvmOverloads constructor(
         focusCoordinator.rememberCurrentFocusTarget()
     }
 
+    fun rememberPlaySpeedTarget() {
+        focusCoordinator.rememberPlaySpeedTarget()
+    }
+
     fun restoreRememberedFocus() {
         focusCoordinator.restoreRememberedFocus()
     }
@@ -994,7 +999,10 @@ class MyPlayerControlView @JvmOverloads constructor(
      */
     fun finishSeekPreviewProgressOnly() {
         removeCallbacks(externalSeekPreviewFinishRunnable)
-        if (!externalSeekPreviewActive) return
+        // externalSeekPreviewActive 为 false 不代表无需收尾：长按期间换线（duration 归 0）
+        // 会让所有 tick 早退、一次 beginSeekPreview 都没发生，但 progress-only 已经进入
+        // ——此时同样要收尾，否则进度条永久停留（v2.1.13 进度条卡住第二路径）
+        if (!externalSeekPreviewActive && !controlViewLayoutManager.isProgressOnlyVisible()) return
         externalSeekPreviewActive = false
         if (!controlViewLayoutManager.scheduleProgressOnlyFadeOutIfApplicable()) {
             exitSeekProgressOnly()
@@ -1106,6 +1114,10 @@ class MyPlayerControlView @JvmOverloads constructor(
 
     fun resetHideCallbacks() {
         controlViewLayoutManager.resetHideCallbacks()
+    }
+
+    fun setHideCallbacksSuspended(suspended: Boolean) {
+        controlViewLayoutManager.setHideCallbacksSuspended(suspended)
     }
 
     fun setAnimationEnabled(enabled: Boolean) {

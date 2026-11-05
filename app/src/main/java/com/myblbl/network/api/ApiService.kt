@@ -8,6 +8,7 @@ import com.myblbl.model.common.GiveCoinResultModel
 import com.myblbl.model.common.ArchiveRelationModel
 import com.myblbl.model.common.CheckGiveCoinModel
 import com.myblbl.model.common.TripleActionResultModel
+import com.myblbl.model.common.ServerTimeModel
 import com.myblbl.model.user.UserStatModel
 import com.myblbl.model.user.UserSpaceInfo
 import com.myblbl.model.user.UserDetailInfoModel
@@ -284,6 +285,9 @@ interface ApiService {
         @FieldMap params: Map<String, String>
     ): BaseResponse<String>
 
+    @GET("x/click-interface/click/now")
+    suspend fun getServerTime(): BaseResponse<ServerTimeModel>
+
     @POST("x/web-interface/archive/like")
     @FormUrlEncoded
     suspend fun like(
@@ -337,8 +341,15 @@ interface ApiService {
     @GET("x/web-interface/history/cursor")
     suspend fun getHistory(
         @Query("view_at") viewAt: Long,
+        @Query("max") max: Long = 0,
+        @Query("business") business: String = "",
         @Query("ps") ps: Int = 20
     ): BaseResponse<HistoryListResponse>
+
+    @GET("x/web-interface/history/continuation")
+    suspend fun getHistoryContinuation(
+        @Query("his_exp") hisExp: Int = 1200
+    ): BaseResponse<JsonObject>
 
     @POST("x/web-interface/feedback/dislike")
     @FormUrlEncoded

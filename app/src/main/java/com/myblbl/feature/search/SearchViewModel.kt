@@ -8,6 +8,7 @@ import com.myblbl.model.search.HotWordModel
 import com.myblbl.model.search.SearchAllCountWrapper
 import com.myblbl.model.search.SearchAllResponseData
 import com.myblbl.model.search.SearchCategoryItem
+import com.myblbl.model.search.SearchDefaultModel
 import com.myblbl.model.search.SearchItemModel
 import com.myblbl.model.search.SearchType
 import com.myblbl.model.search.SearchVideoOrder
@@ -37,6 +38,10 @@ class SearchViewModel(
 
     private val _suggestWords = MutableStateFlow<List<HotWordModel>>(emptyList())
     val suggestWords: StateFlow<List<HotWordModel>> = _suggestWords.asStateFlow()
+
+    /** 官方搜索框默认词（wbi/search/default），null 表示不可用（无 wbi key 或请求失败）。 */
+    private val _searchDefault = MutableStateFlow<SearchDefaultModel?>(null)
+    val searchDefault: StateFlow<SearchDefaultModel?> = _searchDefault.asStateFlow()
 
     private val _searchOverview = MutableStateFlow<SearchAllResponseData?>(null)
     val searchOverview: StateFlow<SearchAllResponseData?> = _searchOverview.asStateFlow()
@@ -92,7 +97,13 @@ class SearchViewModel(
         }
     }
 
-    fun searchAll(keyword: String) {
+    fun loadSearchDefault() {
+        viewModelScope.launch {
+            _searchDefault.value = searchRepository.loadSearchDefault().getOrNull()
+        }
+    }
+
+    fun searchAll(keyword: String, videoOrder: SearchVideoOrder = SearchVideoOrder.TotalRank) {
         searchAllJob?.cancel()
         pageJobs.values.forEach(Job::cancel)
         pageJobs.clear()
@@ -112,7 +123,12 @@ class SearchViewModel(
             result.fold(
                 onSuccess = { overview ->
                     val categories = buildCategories(overview)
-                    val pageStates = buildInitialPageStates(overview, categories)
+                    val pageStates = buildInitialPageStates(overview, categories).toMutableMap()
+                    // 综合搜索接口不支持 order，非综合排序时视频首屏弃用其数据，
+                    // 交给 loadSearchPage 走 search/type 按 order 拉取第一页
+                    if (videoOrder != SearchVideoOrder.TotalRank) {
+                        pageStates[SearchType.Video] = SearchPageState()
+                    }
                     _searchOverview.value = overview
                     _searchPageStates.value = pageStates
                     _searchCategories.value = categories

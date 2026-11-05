@@ -19,10 +19,13 @@ import android.util.AttributeSet
 import android.util.TypedValue
 import android.view.View
 import android.view.ViewGroup
+import android.view.ViewTreeObserver
 import android.widget.ImageView
 import androidx.core.content.ContextCompat
 import com.myblbl.R
+import com.myblbl.core.common.log.AppLog
 import com.myblbl.core.common.log.VideoCardPerfLogger
+import com.myblbl.core.ui.base.UiScale
 import com.myblbl.core.ui.base.UiTextScale
 import pl.droidsonroids.gif.GifDrawable
 import kotlin.math.ceil
@@ -144,8 +147,8 @@ class VideoCoverMetaOverlayView @JvmOverloads constructor(
     attrs: AttributeSet? = null
 ) : View(context, attrs) {
 
-    private val metrics = LightCardMetrics.get(context)
-    private val assets = OverlayAssets.get(context, metrics.metaIconSize)
+    private var metrics = LightCardMetrics.get(context)
+    private var assets = OverlayAssets.get(context, metrics.metaIconSize)
     private val gradientPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val gradientClipPath = Path()
     private val gradientClipRect = RectF()
@@ -169,6 +172,8 @@ class VideoCoverMetaOverlayView @JvmOverloads constructor(
     private var showDanmakuCount = false
     private var showInteractionBadge = false
     private var showChargeBadge = false
+    private var typeBadgeText: String = ""
+    private var typeBadgeColor: Int = TYPE_BADGE_COLOR_DEFAULT
     private var progressMax = 100
     private var progressValue = 0
     private var showProgress = false
@@ -184,6 +189,10 @@ class VideoCoverMetaOverlayView @JvmOverloads constructor(
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         badgeFitDirty = true
+        rebuildCoverGradient(w, h)
+    }
+
+    private fun rebuildCoverGradient(w: Int, h: Int) {
         val top = (h - metrics.coverGradientHeight).coerceAtLeast(0).toFloat()
         gradientPaint.shader = LinearGradient(
             0f,
@@ -204,6 +213,23 @@ class VideoCoverMetaOverlayView @JvmOverloads constructor(
         )
     }
 
+    /**
+     * 密度/档位漂移自愈（issue#102）：字号在 View 构造时固化进 Paint，ViewHolder
+     * 复用永不重读 metrics——运行中系统重置 displayMetrics（电视分辨率/系统栏变化
+     * 等）窗口期构造的卡片会永久偏离，回收池复用即同屏大小不一且不自愈。父布局在
+     * 测到新 metrics 时调用这里整体换档。
+     */
+    internal fun applyMetrics(next: LightCardMetrics) {
+        if (next === metrics) return
+        metrics = next
+        assets = OverlayAssets.get(context, next.metaIconSize)
+        metaPaint.textSize = next.metaTextSize
+        badgeTextPaint.textSize = next.badgeTextSize
+        badgeFitDirty = true
+        if (width > 0 && height > 0) rebuildCoverGradient(width, height)
+        invalidate()
+    }
+
     fun bind(
         playCountText: CharSequence? = this.playCountText,
         showPlayCount: Boolean = this.showPlayCount,
@@ -211,14 +237,19 @@ class VideoCoverMetaOverlayView @JvmOverloads constructor(
         showDanmakuCount: Boolean = this.showDanmakuCount,
         durationText: CharSequence? = this.durationText,
         showInteractionBadge: Boolean = this.showInteractionBadge,
-        showChargeBadge: Boolean = this.showChargeBadge
+        showChargeBadge: Boolean = this.showChargeBadge,
+        typeBadgeText: CharSequence? = this.typeBadgeText,
+        typeBadgeColor: Int = this.typeBadgeColor
     ) {
         val nextPlayCount = playCountText?.toString().orEmpty()
         val nextDanmaku = danmakuText?.toString().orEmpty()
         val nextDuration = durationText?.toString().orEmpty()
+        val nextTypeBadge = typeBadgeText?.toString().orEmpty()
         if (TextUtils.equals(this.playCountText, nextPlayCount) &&
             TextUtils.equals(this.danmakuText, nextDanmaku) &&
             TextUtils.equals(this.durationText, nextDuration) &&
+            TextUtils.equals(this.typeBadgeText, nextTypeBadge) &&
+            this.typeBadgeColor == typeBadgeColor &&
             this.showPlayCount == showPlayCount &&
             this.showDanmakuCount == showDanmakuCount &&
             this.showInteractionBadge == showInteractionBadge &&
@@ -229,6 +260,8 @@ class VideoCoverMetaOverlayView @JvmOverloads constructor(
         this.playCountText = nextPlayCount
         this.danmakuText = nextDanmaku
         this.durationText = nextDuration
+        this.typeBadgeText = nextTypeBadge
+        this.typeBadgeColor = typeBadgeColor
         this.showPlayCount = showPlayCount
         this.showDanmakuCount = showDanmakuCount
         this.showInteractionBadge = showInteractionBadge
@@ -352,7 +385,12 @@ class VideoCoverMetaOverlayView @JvmOverloads constructor(
             right = drawBadge(canvas, context.getString(R.string.core_badge_charge_exclusive), right, top, 0xFFF6A11B.toInt()) - metrics.badgeGap
         }
         if (showInteractionBadge) {
-            drawBadge(canvas, context.getString(R.string.core_badge_interaction), right, top, 0xFFFB7299.toInt())
+            right = drawBadge(canvas, context.getString(R.string.core_badge_interaction), right, top, 0xFFFB7299.toInt()) - metrics.badgeGap
+        }
+        // 类型角标（历史记录「国创/电视剧/番剧…」与直播「直播中/未开播」），
+        // 对齐官方：粉底白字（未开播灰底），排在功能角标左侧
+        if (typeBadgeText.isNotBlank()) {
+            drawBadge(canvas, typeBadgeText, right, top, typeBadgeColor)
         }
     }
 
@@ -398,7 +436,9 @@ class VideoCoverMetaOverlayView @JvmOverloads constructor(
     }
 
     private companion object {
-        private const val PLAYER_PROGRESS_COLOR = 0xFF0088BB.toInt()
+        // 官方历史记录观看进度条同款 B 站粉
+        private const val PLAYER_PROGRESS_COLOR = 0xFFFB7299.toInt()
+        private val TYPE_BADGE_COLOR_DEFAULT = 0xFFFB7299.toInt()
     }
 
     private class OverlayAssets(
@@ -443,10 +483,10 @@ class VideoCardTextLayerView @JvmOverloads constructor(
     attrs: AttributeSet? = null
 ) : View(context, attrs) {
 
-    private val metrics = LightCardMetrics.get(context)
+    private var metrics = LightCardMetrics.get(context)
     private val defaultTitleColor = ContextCompat.getColor(context, R.color.textColor)
     private val ownerTextColor = ContextCompat.getColor(context, R.color.subTextColor)
-    private val assets = TextLayerAssets.get(context, metrics, ownerTextColor)
+    private var assets = TextLayerAssets.get(context, metrics, ownerTextColor)
     private val titlePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         color = defaultTitleColor
         textSize = metrics.titleTextSize
@@ -484,6 +524,21 @@ class VideoCardTextLayerView @JvmOverloads constructor(
     private var cachedPlaying = false
     private var cachedDrawLines: List<String> = emptyList()
 
+    // --- 焦点卡长标题垂直滚动（两行装不下时滚动露出完整标题，失焦即停并复位）---
+    private var cachedFullSource = ""
+    private var cachedFullWidth = -1
+    private var cachedFullPlaying = false
+    private var cachedFullDrawLines: List<String> = emptyList()
+    private var titleScrollRunning = false
+    private var titleScrollOffset = 0f
+    private var titleScrollCycleStartElapsedMs = 0L
+
+    private val cardFocusListener = ViewTreeObserver.OnGlobalFocusChangeListener { _, newFocus ->
+        setTitleScrollEnabled(isFocusOnThisCard(newFocus))
+    }
+
+    private val titleScrollRunnable = Runnable { tickTitleScroll() }
+
     // “正在播放” GIF 动画。GIF 在自定义 Canvas 绘制模式下默认只画首帧，
     // 这里持有 GifDrawable 并通过它的帧回调驱动重绘，让动图真正动起来。
     private var playingDrawable: GifDrawable? = null
@@ -519,11 +574,16 @@ class VideoCardTextLayerView @JvmOverloads constructor(
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
         updatePlayingAnimation()
+        viewTreeObserver.addOnGlobalFocusChangeListener(cardFocusListener)
     }
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
         playingDrawable?.stop()
+        setTitleScrollEnabled(false)
+        if (viewTreeObserver.isAlive) {
+            viewTreeObserver.removeOnGlobalFocusChangeListener(cardFocusListener)
+        }
     }
 
     fun setTitle(
@@ -543,6 +603,9 @@ class VideoCardTextLayerView @JvmOverloads constructor(
         playing = isPlaying
         titleColor = color
         titlePaint.color = color
+        // 换标题/播放态变化：复位滚动（新标题若仍超长且焦点在本卡，下一帧焦点
+        // 监听不会再来，这里按当前焦点态重新评估）
+        setTitleScrollEnabled(isFocusOnThisCard(isFocusedCardView()))
         clearTitleCache()
         if (layoutMayChange) {
             requestLayout()
@@ -556,6 +619,19 @@ class VideoCardTextLayerView @JvmOverloads constructor(
         if (titleColor == color) return
         titleColor = color
         titlePaint.color = color
+        invalidate()
+    }
+
+    /** 密度/档位漂移自愈（issue#102），同 [VideoCoverMetaOverlayView.applyMetrics]。 */
+    internal fun applyMetrics(next: LightCardMetrics) {
+        if (next === metrics) return
+        metrics = next
+        titlePaint.textSize = next.titleTextSize
+        ownerPaint.textSize = next.ownerTextSize
+        badgeTextPaint.textSize = next.badgeTextSize
+        assets = TextLayerAssets.get(context, next, ownerTextColor)
+        setTitleScrollEnabled(false)
+        clearTitleCache()
         invalidate()
     }
 
@@ -646,8 +722,14 @@ class VideoCardTextLayerView @JvmOverloads constructor(
         if (titleText.isBlank()) return
         val lineHeight = titleLineHeight()
         val fontMetrics = titlePaint.fontMetrics
+        if (titleScrollRunning) {
+            // 滚动态：裁剪到标题可视区（owner 行不参与），完整分行随偏移上移
+            canvas.save()
+            canvas.clipRect(0f, 0f, width.toFloat(), (lineHeight * titleLines).toFloat())
+            canvas.translate(0f, -titleScrollOffset)
+        }
         var baseline = -fontMetrics.ascent
-        val lines = titleLines(width)
+        val lines = if (titleScrollRunning) fullTitleLines(width) else titleLines(width)
         var iconSpace = 0f
         if (playing) {
             val iconSize = lineHeight.coerceAtMost(metrics.titleIconFallbackSize)
@@ -666,6 +748,9 @@ class VideoCardTextLayerView @JvmOverloads constructor(
             val x = if (index == 0) iconSpace else 0f
             canvas.drawText(line, x, baseline, titlePaint)
             baseline += lineHeight
+        }
+        if (titleScrollRunning) {
+            canvas.restore()
         }
     }
 
@@ -769,8 +854,7 @@ class VideoCardTextLayerView @JvmOverloads constructor(
         return x
     }
 
-    private fun titleLines(width: Int): List<String> {
-        if (width <= 0 || titleText.isBlank()) return emptyList()
+    private fun titleLines(width: Int): List<String> {        if (width <= 0 || titleText.isBlank()) return emptyList()
         if (cachedTitleSource == titleText &&
             cachedTitleWidth == width &&
             cachedTitleLines == titleLines &&
@@ -815,6 +899,97 @@ class VideoCardTextLayerView @JvmOverloads constructor(
         return (width - iconSpace).coerceAtLeast(0)
     }
 
+    /**
+     * 完整分行（不限行数、末行不截断），供焦点滚动绘制；与 [titleLines] 的前
+     * titleLines 行使用同一 breakText 与行宽，滚动起点与静止态视觉无跳变。
+     */
+    private fun fullTitleLines(width: Int): List<String> {
+        if (width <= 0 || titleText.isBlank()) return emptyList()
+        if (cachedFullSource == titleText && cachedFullWidth == width && cachedFullPlaying == playing) {
+            return cachedFullDrawLines
+        }
+        val result = ArrayList<String>(titleLines + 1)
+        var start = 0
+        while (start < titleText.length) {
+            val lineWidth = titleWidthForLine(result.size).coerceAtLeast(1)
+            val count = titlePaint.breakText(titleText, start, titleText.length, true, lineWidth.toFloat(), null)
+            val end = (start + count).coerceIn(start + 1, titleText.length)
+            result += titleText.substring(start, end).trimEnd()
+            start = end
+            while (start < titleText.length && titleText[start].isWhitespace()) start++
+        }
+        cachedFullSource = titleText
+        cachedFullWidth = width
+        cachedFullPlaying = playing
+        cachedFullDrawLines = result
+        return result
+    }
+
+    /** 焦点是否落在本卡片（文字层的父链上任意一环持有焦点）。 */
+    private fun isFocusOnThisCard(focused: View?): Boolean {
+        val cardRoot = parent as? View ?: return false
+        var v: View? = focused
+        while (v != null) {
+            if (v === cardRoot) return true
+            v = v.parent as? View
+        }
+        return false
+    }
+
+    private fun isFocusedCardView(): View? =
+        if (isAttachedToWindow) rootView.findFocus() else null
+
+    /**
+     * 焦点态长标题垂直滚动：先静止读首屏 [TITLE_SCROLL_START_HOLD_MS]，
+     * 线性滚到末尾，停留 [TITLE_SCROLL_END_HOLD_MS] 后回顶循环；失焦/换标题/
+     * 离屏即停并复位偏移。仅焦点卡片一张在滚，帧驱动重绘本 View 自身。
+     */
+    private fun setTitleScrollEnabled(enabled: Boolean) {
+        if (enabled) {
+            if (titleScrollRunning || !isAttachedToWindow) return
+            if (fullTitleLines(width).size <= titleLines) return
+            titleScrollRunning = true
+            titleScrollOffset = 0f
+            titleScrollCycleStartElapsedMs = SystemClock.elapsedRealtime()
+            postOnAnimation(titleScrollRunnable)
+        } else if (titleScrollRunning) {
+            titleScrollRunning = false
+            removeCallbacks(titleScrollRunnable)
+            titleScrollOffset = 0f
+            invalidate()
+        }
+    }
+
+    private fun tickTitleScroll() {
+        if (!titleScrollRunning || !isAttachedToWindow) {
+            titleScrollRunning = false
+            return
+        }
+        val lineHeight = titleLineHeight()
+        val fullLines = fullTitleLines(width)
+        val maxScrollPx = (fullLines.size - titleLines).coerceAtLeast(0) * lineHeight
+        if (maxScrollPx <= 0) {
+            setTitleScrollEnabled(false)
+            return
+        }
+        val scrollDurationMs = (maxScrollPx / TITLE_SCROLL_SPEED_PX_PER_MS).toLong()
+            .coerceAtLeast(TITLE_SCROLL_MIN_DURATION_MS)
+        val cycleMs = TITLE_SCROLL_START_HOLD_MS + scrollDurationMs + TITLE_SCROLL_END_HOLD_MS
+        var elapsed = SystemClock.elapsedRealtime() - titleScrollCycleStartElapsedMs
+        while (elapsed >= cycleMs) {
+            elapsed -= cycleMs
+            titleScrollCycleStartElapsedMs += cycleMs
+        }
+        titleScrollOffset = when {
+            elapsed < TITLE_SCROLL_START_HOLD_MS -> 0f
+            elapsed < TITLE_SCROLL_START_HOLD_MS + scrollDurationMs ->
+                (elapsed - TITLE_SCROLL_START_HOLD_MS).toFloat() / scrollDurationMs.toFloat() * maxScrollPx
+            else -> maxScrollPx.toFloat()
+        }
+        postInvalidateOnAnimation()
+        postOnAnimation(titleScrollRunnable)
+    }
+
     private fun hasOwnerContent(): Boolean {
         return showOwner && (ownerText.isNotBlank() || ownerBadgeText.isNotBlank() || showOwnerAvatar ||
             historyTimeText.isNotBlank() || historyDeviceRes != 0)
@@ -839,6 +1014,9 @@ class VideoCardTextLayerView @JvmOverloads constructor(
         cachedTitleSource = ""
         cachedTitleWidth = -1
         cachedDrawLines = emptyList()
+        cachedFullSource = ""
+        cachedFullWidth = -1
+        cachedFullDrawLines = emptyList()
     }
 
     private class TextLayerAssets(
@@ -931,12 +1109,18 @@ class VideoCardTextLayerView @JvmOverloads constructor(
 
         /** 与 VideoAdapter.badgeTextFor 的已关注文案保持一致（分段绘制的形态判定键）。 */
         const val FOLLOWED_LABEL = "已关注"
+
+        /** 焦点标题滚动：起点/终点静止时长与速度（px/ms，约 0.4~0.5s 滚一行） */
+        private const val TITLE_SCROLL_START_HOLD_MS = 800L
+        private const val TITLE_SCROLL_END_HOLD_MS = 1600L
+        private const val TITLE_SCROLL_SPEED_PX_PER_MS = 1f / 14f
+        private const val TITLE_SCROLL_MIN_DURATION_MS = 400L
     }
 }
 
 private class FlatVideoLightCardLayout @JvmOverloads constructor(
     context: Context,
-    private val metrics: LightCardMetrics = LightCardMetrics.get(context),
+    private var metrics: LightCardMetrics = LightCardMetrics.get(context),
     private val perfSource: String = "VideoLightCard.flat",
     private val coverRatio: VideoCardCoverRatio = VideoCardCoverRatio.LANDSCAPE_16_9,
     attrs: AttributeSet? = null
@@ -944,8 +1128,8 @@ private class FlatVideoLightCardLayout @JvmOverloads constructor(
 
     lateinit var imageView: View
     lateinit var progressBar: View
-    lateinit var coverMetaOverlay: View
-    lateinit var textLayer: View
+    lateinit var coverMetaOverlay: VideoCoverMetaOverlayView
+    lateinit var textLayer: VideoCardTextLayerView
 
     private var coverLeft = 0
     private var coverTop = 0
@@ -959,6 +1143,31 @@ private class FlatVideoLightCardLayout @JvmOverloads constructor(
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val startNs = SystemClock.elapsedRealtimeNanos()
         val widthSize = MeasureSpec.getSize(widthMeasureSpec)
+        // 密度/档位漂移自愈（issue#102）：字号固化于构造，复用路径不会重读 metrics；
+        // 系统重置 displayMetrics 的窗口期构造的卡片会永久偏离。卡片是纯代码构造，
+        // XML inflate 的密度守卫（UiTextScaleFactory）罩不到，只能在 measure 总入口
+        // 校验快照（LightCardMetrics.get 带缓存与快照校验，未漂移时纳秒级返回）。
+        // v2 教训：自愈信的 fresh 必须是设计密度档——系统重置窗口内裸读会拿到物理
+        // 密度巨字档，把正常卡整批"治愈"成巨字（真机日志 8 卡全中）。重钉已在
+        // LightCardMetrics.get 内部完成，这里拿到的 fresh 恒为设计档，真换档才会判漂移。
+        val fresh = LightCardMetrics.get(context)
+        // 必须按快照值判漂移而非实例同一性：get 缓存是 WeakHashMap，滚动中的 GC
+        // 会清掉缓存条目并重建一个值相同的新实例，实例比较会把这种重建误判为漂移，
+        // 每次都走无意义的 assets 重建并刷屏日志，劣化滚动性能。全部派生值由
+        // scale+density 两输入决定，二者相等即整卡绘制参数相等。
+        if (fresh.scaleSnapshot != metrics.scaleSnapshot || fresh.densitySnapshot != metrics.densitySnapshot) {
+            AppLog.w(
+                TAG,
+                "metrics drift healed[$perfSource]: density ${metrics.densitySnapshot}->${fresh.densitySnapshot} " +
+                    "textScale ${metrics.scaleSnapshot}->${fresh.scaleSnapshot} " +
+                    "titlePx ${metrics.titleTextSize}->${fresh.titleTextSize}"
+            )
+            metrics = fresh
+            coverMetaOverlay.applyMetrics(fresh)
+            textLayer.applyMetrics(fresh)
+            lastContentWidth = -1
+            lastDesiredHeight = -1
+        }
         val contentWidth = (widthSize - metrics.horizontalMargin * 2).coerceAtLeast(0)
         if (canReuseMeasuredChildren(widthSize, contentWidth)) {
             setMeasuredDimension(
@@ -1035,9 +1244,13 @@ private class FlatVideoLightCardLayout @JvmOverloads constructor(
         params is LayoutParams
 
     private fun exact(size: Int): Int = MeasureSpec.makeMeasureSpec(size.coerceAtLeast(0), MeasureSpec.EXACTLY)
+
+    private companion object {
+        private const val TAG = "VideoCard"
+    }
 }
 
-private class LightCardMetrics private constructor(context: Context) {
+internal class LightCardMetrics private constructor(context: Context) {
     val cardRadius = dimen(context, R.dimen.px15)
     val paddingTop = dimen(context, R.dimen.px20)
     val paddingBottom = dimen(context, R.dimen.px15)
@@ -1047,7 +1260,7 @@ private class LightCardMetrics private constructor(context: Context) {
     val avatarStart = dimen(context, R.dimen.px2)
     val ownerTextMarginEnd = dimen(context, R.dimen.px8)
     val coverGradientHeight = dimen(context, R.dimen.px70)
-    val progressHeight = dimen(context, R.dimen.px3)
+    val progressHeight = dimen(context, R.dimen.px4)
     val metaIconSize = dimen(context, R.dimen.px30)
     val coverMetaStart = dimen(context, R.dimen.px10)
     val coverMetaBottom = dimen(context, R.dimen.px10)
@@ -1094,14 +1307,24 @@ private class LightCardMetrics private constructor(context: Context) {
         private val cache = java.util.WeakHashMap<android.content.res.Resources, LightCardMetrics>()
 
         fun get(context: Context): LightCardMetrics {
+            val appContext = context.applicationContext ?: context
             val resources = context.resources
             val scale = UiTextScale.scale()
+            // 系统重置显示指标（前台 Activity 切换 / config change 无重建路径，荣耀
+            // Android16 高频发生）会把共享 DisplayMetrics 打回物理密度；UiScale 的
+            // 事件守卫（onResume/focus）在滚动 measure 之后才跑。get 是卡片字号唯一
+            // 解析通道，必须先重钉再读，保证构造与快照恒为设计密度档——否则系统
+            // 重置窗口内这里返回物理密度档巨字，onMeasure 的自愈会信这个坏真值把
+            // 正常卡整批切到巨字（issue#102 真机日志实锤：返回主页 20ms 内 8 卡
+            // 全切 108.5px，60ms 后守卫重钉又切回，同屏大小不一+闪变）。
+            UiScale.ensureApplied(resources)
+            UiScale.ensureApplied(appContext.resources)
             val density = resources.displayMetrics.density
             synchronized(cache) {
                 // Resources 实例在 Activity recreate 后可能复用，档位/密度变化时按快照失效重建
                 cache[resources]?.takeIf { it.scaleSnapshot == scale && it.densitySnapshot == density }
                     ?: cache.remove(resources)
-                return cache.getOrPut(resources) { LightCardMetrics(context.applicationContext ?: context) }
+                return cache.getOrPut(resources) { LightCardMetrics(appContext) }
             }
         }
     }
