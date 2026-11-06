@@ -11,7 +11,7 @@ set -u
 cd "$(dirname "$0")/.."
 
 PROXY="${1:-${HTTPS_PROXY:-}}"
-REPO="qianxuntudou-ops/MyTVB"
+REPO="SevenMu/MyBLBL"
 URL="https://github.com/$REPO/releases/latest/download/version.json"
 UA="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
 
