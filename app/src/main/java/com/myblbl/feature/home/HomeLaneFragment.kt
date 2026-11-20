@@ -18,6 +18,7 @@ import com.myblbl.event.AppEventHub
 import com.myblbl.core.ui.focus.SpatialFocusNavigator
 import com.myblbl.core.ui.focus.TabContentFocusHelper
 import com.myblbl.core.ui.render.FirstScreenRenderer
+import com.myblbl.core.ui.tab.HomeTabPage
 import com.myblbl.feature.series.AllSeriesFragment
 import com.myblbl.feature.series.SeriesDetailFragment
 import com.myblbl.model.lane.HomeLaneSection

@@ -284,7 +284,7 @@
     fetch(api('/api/snapshot/create-and-download')).then(function (r) {
       if (!r.ok) throw new Error('http ' + r.status);
       var m = (r.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/);
-      var name = m ? m[1] : 'MyBLBL_log.txt';
+      var name = m ? m[1] : 'mytvb_log.txt';
       return r.blob().then(function (b) { return { name: name, blob: b }; });
     }).then(function (f) {
       var a = document.createElement('a');

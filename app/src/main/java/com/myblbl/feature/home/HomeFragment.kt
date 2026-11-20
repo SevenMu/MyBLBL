@@ -15,6 +15,9 @@ import com.google.android.material.tabs.TabLayout
 import com.google.android.material.tabs.TabLayoutMediator
 import androidx.viewpager2.widget.ViewPager2
 import com.myblbl.databinding.FragmentHomeBinding
+import com.myblbl.R
+import com.myblbl.event.AppEventHub
+import com.myblbl.feature.me.MeTabPage
 import com.myblbl.ui.activity.MainActivity
 import com.myblbl.ui.fragment.main.MainNavigationViewModel
 import com.myblbl.ui.fragment.main.MainTabFocusTarget
@@ -23,6 +26,8 @@ import com.myblbl.core.ui.base.UiScale
 import com.myblbl.core.ui.tab.enableTouchNavigation
 import com.myblbl.core.ui.tab.focusNearestTabTo
 import com.myblbl.core.ui.tab.focusSelectedTab
+import com.myblbl.core.ui.tab.HomeTabPage
+import com.myblbl.core.ui.tab.SecondaryTabHost
 import com.myblbl.core.ui.tab.disableAdjacentPagePrefetch
 import com.myblbl.core.ui.tab.retainAllPagesAfterFirstLayout
 import com.myblbl.core.ui.focus.SpatialFocusNavigator
@@ -30,12 +35,11 @@ import com.myblbl.core.ui.focus.EdgeTabSwitch
 import com.myblbl.core.common.settings.AppSettingsDataStore
 import com.myblbl.core.common.ext.getHomeDefaultStartPageIndex
 import com.myblbl.core.common.log.AppLog
-import com.myblbl.event.AppEventHub
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import org.koin.android.ext.android.inject
 
-class HomeFragment : Fragment(), MainTabFocusTarget, OnBackPressedHandler {
+class HomeFragment : Fragment(), MainTabFocusTarget, OnBackPressedHandler, SecondaryTabHost {
 
     companion object {
         fun newInstance(): HomeFragment {
@@ -69,10 +73,14 @@ class HomeFragment : Fragment(), MainTabFocusTarget, OnBackPressedHandler {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         val t0 = SystemClock.elapsedRealtime()
         super.onViewCreated(view, savedInstanceState)
+        // 「首页个人页签」开关（默认开）+「首页板块管理」勾选分区 → 组合完整 tab 配置
         adapter = HomeFragmentStateAdapter(
             fragmentManager = childFragmentManager,
             lifecycle = viewLifecycleOwner.lifecycle,
-            regionRids = HomeRegionCatalog.loadSelectedRids(appSettings)
+            initialSpecs = HomeFragmentStateAdapter.buildSpecs(
+                HomeRegionCatalog.loadSelectedRids(appSettings),
+                HomeFragmentStateAdapter.personalTabsEnabled(appSettings)
+            )
         )
         binding.viewPager.adapter = adapter
         // 冷启动先按需创建（只建当前页，不拖慢首帧），首帧后再保留全部 tab 页：
@@ -131,12 +139,25 @@ class HomeFragment : Fragment(), MainTabFocusTarget, OnBackPressedHandler {
         }
 
         // "首页板块管理"勾选变化：即时重排 tab（设置页是 overlay，本页仍 STARTED 可实时收到；
-        // 另在 onResume 幂等兜底，防止事件被错过）
+        // 另在 onResume 幂等兜底，防止事件被错过）。
+        // 会话跳变（登录/登出）同步刷新并入首页的个人页（历史/稍后观看/收藏）：
+        // ViewPager 内非当前页 isVisible=false 收不到子页自身订阅，宿主遍历兜底
+        // （同 MeFragment 的会话刷新逻辑）；开关关闭时没有 MeTabPage 子页，转型自然空跑。
         viewLifecycleOwner.lifecycleScope.launch {
             viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
                 appEventHub.events.collectLatest { event ->
-                    if (event is AppEventHub.Event.HomeRegionsChanged) {
-                        applyRegionTabsIfNeeded()
+                    when (event) {
+                        AppEventHub.Event.HomeRegionsChanged -> applyRegionTabsIfNeeded()
+                        AppEventHub.Event.UserSessionChanged -> {
+                            adapter.specs.forEachIndexed { position, _ ->
+                                val fragment = adapter.getCurrentFragment(position) ?: return@forEachIndexed
+                                if (fragment !is MeTabPage) return@forEachIndexed
+                                if (fragment.view != null && !fragment.shouldDeferSessionRefresh()) {
+                                    fragment.refresh()
+                                }
+                            }
+                        }
+                        else -> Unit
                     }
                 }
             }
@@ -149,7 +170,10 @@ class HomeFragment : Fragment(), MainTabFocusTarget, OnBackPressedHandler {
     private fun getDefaultTabIndex(): Int {
         return getHomeDefaultStartPageIndex(
             maxIndex = adapter.itemCount - 1,
-            defaultIndex = 0
+            defaultIndex = 0,
+            // 番剧/影视的实际位置随「首页个人页签」开关变化，按当前 tab 配置取
+            animationIndex = specPositionOf(R.string.animation, fallback = 2),
+            cinemaIndex = specPositionOf(R.string.film_and_television, fallback = 3)
         )
     }
 
@@ -168,28 +192,59 @@ class HomeFragment : Fragment(), MainTabFocusTarget, OnBackPressedHandler {
     private fun applyRegionTabsIfNeeded() {
         val currentBinding = _binding ?: return
         if (!this::adapter.isInitialized) return
-        val newRids = HomeRegionCatalog.loadSelectedRids(appSettings)
-        val currentPageIdentity = adapter.pageIdentityAt(currentBinding.viewPager.currentItem)
-        if (!adapter.updateRegions(newRids)) {
+        val newSpecs = HomeFragmentStateAdapter.buildSpecs(
+            HomeRegionCatalog.loadSelectedRids(appSettings),
+            HomeFragmentStateAdapter.personalTabsEnabled(appSettings)
+        )
+        if (adapter.specs == newSpecs) {
             return
         }
+        val currentItemId = adapter.getItemId(currentBinding.viewPager.currentItem)
+        adapter.updateSpecs(newSpecs)
         // 页数可能增加：首帧后保留全部页的 offscreenPageLimit 需跟随新页数，
         // 否则超出旧 limit 的分区页会被销毁重建（ViewModel 与滚动进度丢失）。
         val pageCount = adapter.itemCount
         currentBinding.viewPager.offscreenPageLimit =
             if (pageCount > 1) pageCount - 1 else ViewPager2.OFFSCREEN_PAGE_LIMIT_DEFAULT
-        val targetPosition = adapter.positionOfIdentity(currentPageIdentity)
+        val targetPosition = newSpecs.indexOfFirst { it.itemId == currentItemId }
         currentBinding.viewPager.setCurrentItem(
             if (targetPosition >= 0) targetPosition else 0,
             false
         )
-        AppLog.i("HomeRegions", "region tabs updated size=${newRids.size} resume=$currentPageIdentity->$targetPosition")
+        AppLog.i("HomeRegions", "region tabs updated size=${newSpecs.size} item=$currentItemId->$targetPosition")
     }
 
     /** 分区页位置查询：动态 tab 下 RegionFeedFragment 向宿主反查自身 tab 序号。 */
     fun positionOfRegionPage(rid: Int): Int {
         if (!this::adapter.isInitialized) return -1
         return adapter.positionOfRegion(rid)
+    }
+
+    private fun specPositionOf(titleRes: Int, fallback: Int): Int {
+        val index = adapter.specs.indexOfFirst { it.titleRes == titleRes }
+        return if (index >= 0) index else fallback
+    }
+
+    /**
+     * 设置「首页个人页签」开关切换时由 MainActivity 调用（立即生效）：
+     * 换 tab 配置并把当前停留页重定位到同 itemId 的新位置（配置里找不到则回推荐）。
+     * view 尚未创建时跳过——下次 onViewCreated 会按开关读初始配置。
+     */
+    fun applyPersonalTabsEnabled(enabled: Boolean) {
+        val currentBinding = _binding ?: return
+        val target = HomeFragmentStateAdapter.buildSpecs(
+            HomeRegionCatalog.loadSelectedRids(appSettings),
+            enabled
+        )
+        if (adapter.specs == target) return
+        val currentItemId = adapter.getItemId(currentBinding.viewPager.currentItem)
+        adapter.updateSpecs(target)
+        val pageCount = adapter.itemCount
+        currentBinding.viewPager.offscreenPageLimit =
+            if (pageCount > 1) pageCount - 1 else ViewPager2.OFFSCREEN_PAGE_LIMIT_DEFAULT
+        val newPosition = target.indexOfFirst { it.itemId == currentItemId }
+            .let { if (it < 0) 0 else it }
+        currentBinding.viewPager.setCurrentItem(newPosition, false)
     }
 
 
@@ -224,7 +279,7 @@ class HomeFragment : Fragment(), MainTabFocusTarget, OnBackPressedHandler {
     /**
      * 列表顶行 UP 的落点：聚焦当前选中的二级 tab（不切页），对齐 blbl focusSelectedTabIfAvailable。
      */
-    fun focusSelectedTabFromContent(): Boolean {
+    override fun focusSelectedTabFromContent(): Boolean {
         return _binding?.tabLayout?.focusSelectedTab() == true
     }
 
@@ -232,7 +287,7 @@ class HomeFragment : Fragment(), MainTabFocusTarget, OnBackPressedHandler {
      * 内容网格左右边缘切二级 tab（对齐 blbl 的边缘切页）。
      * 首 tab 左边缘回退到主边栏、末 tab 右边缘吞键，均保持原有行为。
      */
-    fun switchAdjacentTabFromContentEdge(delta: Int): Boolean {
+    override fun switchAdjacentTabFromContentEdge(delta: Int): Boolean {
         val currentBinding = _binding ?: return false
         // 设置「卡片边缘切换标签」关闭：只关「切 tab」——左边缘环绕回主边栏
         // 当前主 tab 对应按钮；右边缘吞键停原地（对齐 blbl 右边缘无外流）

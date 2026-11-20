@@ -19,6 +19,7 @@ import com.myblbl.core.ui.base.RecyclerViewPoolPrewarmer
 import com.myblbl.core.ui.base.adaptiveSpanCount
 import com.myblbl.core.ui.focus.tv.TvDataChangeReason
 import com.myblbl.core.ui.render.FirstScreenRenderer
+import com.myblbl.core.ui.tab.HomeTabPage
 import com.myblbl.event.AppEventHub
 import com.myblbl.feature.player.PlayerInstancePool
 import com.myblbl.model.video.VideoModel

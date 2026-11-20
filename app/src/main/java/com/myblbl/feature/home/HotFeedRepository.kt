@@ -71,7 +71,11 @@ class HotFeedRepository {
                 appHotNextIdx = batch.nextIdx
                 if (batch.nextIdx < 0) exhausted = true
                 val before = merged.size
-                batch.items.forEach { item -> merged.putIfAbsent(item.aid, item) }
+                batch.items.forEach { item ->
+                    // API 23 兼容：Map.putIfAbsent 是 API 24+ 方法，Android 6.0 上
+                    // NoSuchMethodError 启动即崩（上游未修，本地以 containsKey 等价实现）
+                    if (!merged.containsKey(item.aid)) merged[item.aid] = item
+                }
                 if (merged.size == before && batch.nextIdx >= 0) {
                     // 游标前进但内容全重复也视为到底
                     exhausted = true

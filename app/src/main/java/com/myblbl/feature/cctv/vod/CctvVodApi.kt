@@ -273,7 +273,7 @@ class CctvVodApi(
         private const val TAG = "CctvVodApi"
         private const val PAGE_SIZE = 24
         private const val EPISODE_PAGE_SIZE = 100
-        private const val CALLBACK_NAME = "MyBLBLCb"
+        private const val CALLBACK_NAME = "myTvbCb"
 
         /** 央视点播请求 UA（原生播放的 HTTP DataSource 复用同一身份）。 */
         const val USER_AGENT =

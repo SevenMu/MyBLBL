@@ -22,6 +22,7 @@
     <string name="chapter_playing">Now playing</string>
     <string name="show_chapter_bar">Chapter bar</string>
     <string name="clear_cache">Clear cache</string>
+    <string name="media_cache_write">Cache video while playing</string>
     <string name="risk_control_verify">Risk control verification</string>
     <string name="risk_register_failed_format">Request failed: %1$s</string>
     <string name="risk_submit_failed_format">Submit failed: %1$s</string>
@@ -156,6 +157,7 @@
     <string name="liked_">Liked</string>
     <string name="live">Live</string>
     <string name="live_entry">Live entry</string>
+    <string name="home_personal_tabs">History, watch later and favorites on home</string>
     <string name="edge_tab_switch">Switch tabs at card edge</string>
     <string name="cctv_live">CCTV Live</string>
     <string name="cctv_native_live">Live turbo mode</string>

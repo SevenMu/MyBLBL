@@ -79,6 +79,7 @@ object ApkUpdater {
         } else {
             listOf(url)
         }
+
     /** 启动自动检查的忽略版本：用户在自动弹窗点「稍后」后落盘，同版本不再自动弹 */
     const val KEY_IGNORED_VERSION = "update_ignored_version"
 

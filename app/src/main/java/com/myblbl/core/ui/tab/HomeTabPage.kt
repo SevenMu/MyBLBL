@@ -1,4 +1,4 @@
-package com.myblbl.feature.home
+package com.myblbl.core.ui.tab
 
 import com.myblbl.core.ui.focus.TabContentFocusTarget
 

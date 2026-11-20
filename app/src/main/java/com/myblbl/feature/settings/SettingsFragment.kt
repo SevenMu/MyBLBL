@@ -33,6 +33,7 @@ import com.myblbl.databinding.FragmentSettingsBinding
 import com.myblbl.feature.cast.NvaCastController
 import com.myblbl.feature.cast.NvaDevice
 import com.myblbl.feature.home.FeedSourceSetting
+import com.myblbl.feature.home.HomeFragmentStateAdapter
 import com.myblbl.model.SettingModel
 import com.myblbl.ui.adapter.SettingAdapter
 import com.myblbl.ui.adapter.SettingRow
@@ -98,6 +99,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>(), OnBackPressedH
         private const val CATEGORY_ABOUT = 7
 
         private const val KEY_CACHE_LIMIT = "cache_limit"
+        private const val KEY_MEDIA_CACHE_WRITE = "media_cache_write"
         private const val KEY_DEFAULT_START_PAGE = "default_start_page"
         // 与 FeedSourceSetting 同键（存储值「APP端/网页端」），首页推荐/热门数据来源
         private const val KEY_HOME_FEED_SOURCE = FeedSourceSetting.KEY_HOME_FEED_SOURCE
@@ -105,6 +107,9 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>(), OnBackPressedH
         private const val KEY_IMAGE_QUALITY = "image_quality"
         private const val KEY_THEME = "theme"
         private const val KEY_LIVE_ENTRY = "live_entry"
+        // 首页个人页签开关（与 HomeFragmentStateAdapter.PERSONAL_TABS_KEY 同键，存储值"开/关"），
+        // 默认开：历史/稍后观看/收藏并入首页 tab，隐藏侧栏「我的」入口
+        private const val KEY_HOME_PERSONAL_TABS = HomeFragmentStateAdapter.PERSONAL_TABS_KEY
         // 与 EdgeTabSwitch 同键（存储值"开/关"），默认开：卡片左右移到列表边缘切换顶部 tab
         private const val KEY_EDGE_TAB_SWITCH = EdgeTabSwitch.KEY
         private const val KEY_CCTV_LIVE_ENTRY = "cctv_live_entry"
@@ -298,7 +303,9 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>(), OnBackPressedH
                 stored(KEY_HOME_FEED_SOURCE, R.string.home_feed_source, FeedSourceSetting.DEFAULT),
                 stored(KEY_HOT_FEED_SOURCE, R.string.hot_feed_source, FeedSourceSetting.DEFAULT),
                 stored(KEY_LIVE_ENTRY, R.string.live_entry, "关"),
-                stored(KEY_EDGE_TAB_SWITCH, R.string.edge_tab_switch, "开"),
+                stored(KEY_HOME_PERSONAL_TABS, R.string.home_personal_tabs, "开"),
+                // 打开方式：点卡片直接播放 / 先进详情页（与默认首页等同属浏览行为）
+                stored(KEY_SHOW_VIDEO_DETAIL, R.string.show_video_detail_page, "关"),
                 // CCTV 相关条目已归入「电视直播」分类（tvGroups）
                 // 投屏开关默认值直接读 cast 自有存储（不进 appSettings，冷启动即可读），
                 // 因此无需在 applyStored 段恢复
@@ -306,8 +313,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>(), OnBackPressedH
                 plain(KEY_CAST_DEVICE_NAME, R.string.cast_device_name, NvaDevice.displayName(requireContext()))
             )),
             SettingGroup(R.string.setting_group_interact, listOf(
-                stored(KEY_SHOW_VIDEO_DETAIL, R.string.show_video_detail_page, "关"),
-                stored(KEY_DOUYIN_MODE, R.string.douyin_mode, "关"),
+                stored(KEY_EDGE_TAB_SWITCH, R.string.edge_tab_switch, "关"),
                 stored(KEY_GIVE_COIN_NUMBER, R.string.give_coin_number, "2"),
                 plain(KEY_HOME_REGIONS, R.string.setting_home_regions, HomeRegionCatalog.selectedCountText(appSettings))
             )),
@@ -318,7 +324,8 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>(), OnBackPressedH
             )),
             SettingGroup(R.string.setting_group_storage, listOf(
                 plain(KEY_CLEAR_CACHE, R.string.clear_cache, "0.0kb"),
-                stored(KEY_CACHE_LIMIT, R.string.cache_limit, "200 MB")
+                stored(KEY_CACHE_LIMIT, R.string.cache_limit, "200 MB"),
+                stored(KEY_MEDIA_CACHE_WRITE, R.string.media_cache_write, "开")
             ))
         )
 
@@ -354,7 +361,9 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>(), OnBackPressedH
                 stored(KEY_RESUME_PLAYBACK, R.string.resume_playback, "开"),
                 stored(KEY_SKIP_OFFICIAL_OP_ED, R.string.skip_official_op_ed, "开"),
                 stored(KEY_AFTER_PLAY, R.string.after_play, "播推荐视频"),
-                stored(KEY_PLAY_FINISH_EXIT_PLAYER, R.string.play_finish_exit_player, "开")
+                stored(KEY_PLAY_FINISH_EXIT_PLAYER, R.string.play_finish_exit_player, "开"),
+                // 抖音模式是播放器内遥控上下切视频，从「通用·交互」归入播放行为
+                stored(KEY_DOUYIN_MODE, R.string.douyin_mode, "关")
             )),
             // 空降助手：总开关 + 逐类跳过开关（默认总开关开，跳过类型只开赞助/恰饭，其余默认关）
             SettingGroup(R.string.setting_group_sponsor_skip, listOf(
@@ -750,6 +759,10 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>(), OnBackPressedH
                 appSettings.putStringAsync(key, it)
                 (activity as? MainActivity)?.applyLiveEntryVisibility()
             }
+            KEY_HOME_PERSONAL_TABS -> toggle(key) {
+                appSettings.putStringAsync(key, it)
+                (activity as? MainActivity)?.applyMeEntryVisibility()
+            }
             KEY_EDGE_TAB_SWITCH -> toggle(key)
             // —— 电视直播 ——
             KEY_CCTV_LIVE_ENTRY -> toggle(key) {
@@ -779,6 +792,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>(), OnBackPressedH
             // —— 通用·存储 ——
             KEY_CLEAR_CACHE -> clearCache()
             KEY_CACHE_LIMIT -> showCacheLimitDialog()
+            KEY_MEDIA_CACHE_WRITE -> toggleMediaCacheWrite()
             // —— 显示·外观 ——
             KEY_THEME -> showCommonChoiceDialog(key, THEME_OPTIONS)
             KEY_UI_LANGUAGE -> showLanguageChoiceDialog()
@@ -1278,6 +1292,19 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>(), OnBackPressedH
         }
     }
 
+    /** 「边看边存」开关：切换后释放 SimpleCache 并失效暖复用（对齐缓存上限的处理）。 */
+    private fun toggleMediaCacheWrite() {
+        val item = itemOf(KEY_MEDIA_CACHE_WRITE) ?: return
+        val newValue = if (item.value == "开") "关" else "开"
+        updateStored(KEY_MEDIA_CACHE_WRITE, newValue)
+        appSettings.putStringAsync(KEY_MEDIA_CACHE_WRITE, newValue)
+        if (newValue == "关") {
+            // 关：数据源工厂下次起播直接走纯直连（无需 reset，但统一释放避免悬挂引用）
+            PlayerMediaCache.reset(requireContext())
+            VideoPlayerViewModel.clearCachedPlayback()
+        }
+    }
+
     private fun showCacheLimitDialog() {
         val item = itemOf(KEY_CACHE_LIMIT) ?: return
         showStoredChoiceDialog(
@@ -1361,6 +1388,7 @@ class SettingsFragment : BaseFragment<FragmentSettingsBinding>(), OnBackPressedH
             }
         }
         applyStored(KEY_LIVE_ENTRY)
+        applyStored(KEY_HOME_PERSONAL_TABS)
         applyStored(KEY_EDGE_TAB_SWITCH)
         applyStored(KEY_CCTV_LIVE_ENTRY)
         applyStored(KEY_CCTV_NATIVE_LIVE)

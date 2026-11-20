@@ -60,6 +60,15 @@ class CctvH5eDataSource(
     override fun open(dataSpec: DataSpec): Long {
         close()
         openedUri = dataSpec.uri
+        // 直播起播预取交接（issue#106 换台提速）：命中（清单原文/已解密分片）直接回放，
+        // 跳过上游网络与解密。take 即删——媒体清单仅首次请求命中，reload 走网络。
+        // 点播（vodMode）URL 与直播不同命名空间，天然不会误命中。
+        CctvLivePrefetcher.take(dataSpec.uri.toString())?.let { prefetched ->
+            decryptedBuffer = prefetched
+            bufferOffset = 0
+            AppLog.i(TAG, "预取命中 uri=${dataSpec.uri.lastPathSegment} size=${prefetched.size}")
+            return prefetched.size.toLong()
+        }
         upstream.open(dataSpec)
 
         // 整段读入（HLS 分片响应有 Content-Length；流式兜底读到 EOF）
@@ -88,7 +97,13 @@ class CctvH5eDataSource(
             }
             if (decrypted == null) {
                 val key = dataSpec.uri.toString()
-                val fails = synchronized(trapFailCounts) { trapFailCounts.merge(key, 1, Int::plus)!! }
+                // API 23 兼容：Map.merge 是 API 24+ 方法，Android 6.0 上
+                // NoSuchMethodError（上游未修，本地以等价计数实现）
+                val fails = synchronized(trapFailCounts) {
+                    val next = (trapFailCounts[key] ?: 0) + 1
+                    trapFailCounts[key] = next
+                    next
+                }
                 AppLog.e(TAG, "H5e 解密返回空（trap/会话未就绪）uri=${dataSpec.uri.lastPathSegment} fail#$fails")
                 if (fails >= TRAP_FAIL_LIMIT) {
                     // 确定性失败：直接通知宿主回退（media3 对 source error 的内部
